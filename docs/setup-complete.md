@@ -1,12 +1,12 @@
 # 프론트엔드 프로젝트 구조 설정 완료
 
-## ✅ 완료된 작업
+## 완료된 작업
 
 ### 1. 프로젝트 초기 설정
 
-- ✅ React 18 + Vite 프로젝트 구성
-- ✅ React Router 통합 (SPA 라우팅)
-- ✅ Axios 설정 (API 호출용)
+- React 18 + Vite 프로젝트 구성
+- React Router 통합 (SPA 라우팅)
+- Axios 설정 (API 호출용)
 
 ### 2. 디렉토리 구조 구축
 
@@ -51,7 +51,7 @@ src/
 - `.env.example`: 환경 변수 템플릿
 - `package.json`: 의존성 관리
 
-## 🚀 다음 단계
+## 다음 단계
 
 ### 필수 작업
 
@@ -95,7 +95,7 @@ src/
    - 북마크/즐겨찾기 페이지
    - 내 정보 페이지
 
-## 📝 주요 파일 설명
+## 주요 파일 설명
 
 - `src/api/client.js`: Axios 인스턴스 및 기본 HTTP 메서드
 - `src/api/book.js`: 그림책 관련 API 호출 함수
@@ -104,7 +104,7 @@ src/
 - `src/hooks/useFetch.js`: API 데이터 페칭 관리
 - `src/routes/index.js`: 라우트 설정 정보
 
-## 🔗 참고 링크
+## 참고 링크
 
 - [React 공식 문서](https://react.dev)
 - [React Router 문서](https://reactrouter.com)
