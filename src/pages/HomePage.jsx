@@ -6,8 +6,22 @@
  */
 
 import { useNavigate } from 'react-router-dom'
-import Button from '../components/common/Button'
-import Card from '../components/common/Card'
+import { Button, Card } from '../components/common'
+import heroImage from '../assets/home-hero.png'
+import logoImage from '../assets/logo.png'
+
+function ArrowIcon() {
+  return (
+    <svg viewBox="0 0 17 17" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M4.89715 1.12408C4.89715 0.503267 5.41394 0 6.05142 0H15.8457C16.4832 0 17 0.503267 17 1.12408V10.6622C17 11.283 16.4832 11.7863 15.8457 11.7863C15.2082 11.7863 14.6915 11.283 14.6915 10.6622V3.83784L1.97046 16.2261C1.51969 16.6651 0.788848 16.6651 0.338078 16.2261C-0.112693 15.7871 -0.112693 15.0754 0.338078 14.6364L13.0591 2.24816H6.05142C5.41394 2.24816 4.89715 1.74489 4.89715 1.12408Z"
+        fill="currentColor"
+      />
+    </svg>
+  )
+}
 
 function BookIcon() {
   return (
@@ -42,51 +56,103 @@ function VoiceIcon() {
   )
 }
 
+const features = [
+  {
+    variant: 'primary',
+    icon: <BookIcon />,
+    title: '그림책 탐색',
+    description: (
+      <>
+        촉각 그림책과 교구를
+        <br />
+        자유롭게 탐색해보세요.
+      </>
+    ),
+  },
+  {
+    variant: 'secondary',
+    icon: <TouchIcon />,
+    title: '손끝 인식',
+    description: '손끝으로 만지는 그림과 점자를 정확하게 인식합니다.',
+  },
+  {
+    variant: 'accent',
+    icon: <VoiceIcon />,
+    title: '음성 안내',
+    description: (
+      <>
+        AI가 내용을 음성으로 설명해
+        <br />
+        책 읽기를 도와줍니다.
+      </>
+    ),
+  },
+]
+
 function HomePage() {
   const navigate = useNavigate()
 
   return (
     <div className="home-page">
       <header className="home-header">
-        <h1>AI 그림책 독서 보조 서비스</h1>
-        <p>시각장애 아동을 위한 스마트 독서 경험</p>
+        <div className="home-header-inner">
+          <a className="home-brand" href="/" aria-label="Fingertips 홈">
+            <img src={logoImage} alt="" />
+            Fingertips
+          </a>
+        </div>
       </header>
 
       <main className="home-main">
-        <section className="feature-section">
-          <h2>주요 기능</h2>
-          <div className="feature-list">
-            <Card
-              className="feature-item"
-              variant="primary"
-              icon={<BookIcon />}
-              title="그림책 탐색"
-              description="촉각 그림책과 교구를 자유롭게 탐색해보세요."
-            />
-            <Card
-              className="feature-item"
-              variant="secondary"
-              icon={<TouchIcon />}
-              title="손끝 인식"
-              description="손끝으로 만지는 그림과 점자를 정확하게 인식합니다."
-            />
-            <Card
-              className="feature-item"
-              variant="accent"
-              icon={<VoiceIcon />}
-              title="음성 안내"
-              description="AI가 내용을 음성으로 설명해 책 읽기를 도와줍니다."
-            />
+        <section className="home-hero" aria-labelledby="home-hero-title">
+          <div className="home-hero-inner">
+            <div className="home-hero-copy">
+              <h1 id="home-hero-title">
+                <span>손끝으로 읽는</span>
+                <strong>AI 그림책</strong>
+              </h1>
+              <div className="home-hero-description">
+                <p className="home-hero-lead">시각장애 아동을 위한 독서 보조 서비스</p>
+                <p>
+                  그림, 점자, 촉각 교구를 손끝으로 만지면
+                  <br />
+                  AI가 음성으로 자세히 설명해줘요.
+                </p>
+              </div>
+              <Button
+                className="home-hero-button"
+                size="lg"
+                icon={<ArrowIcon />}
+                onClick={() => navigate('/reading')}
+              >
+                독서 시작하기
+              </Button>
+            </div>
+
+            <div className="home-hero-visual" aria-hidden="true">
+              <img src={heroImage} alt="" />
+            </div>
           </div>
         </section>
 
-        <section className="action-section">
-          <Button size="lg" icon="↗" onClick={() => navigate('/reading')}>
-            독서 시작하기
-          </Button>
-          <Button variant="secondary" size="lg" onClick={() => navigate('/guide')}>
-            사용 가이드
-          </Button>
+        <section className="home-features" aria-labelledby="home-features-title">
+          <div className="home-section-heading">
+            <p>주요 기능</p>
+            <h2 id="home-features-title">With us, the world is at my fingertips.</h2>
+          </div>
+
+          <div className="home-feature-list">
+            {features.map((feature) => (
+              <Card
+                key={feature.title}
+                className="home-feature-card"
+                variant={feature.variant}
+                icon={feature.icon}
+                title={feature.title}
+                description={feature.description}
+              />
+            ))}
+          </div>
         </section>
       </main>
     </div>
