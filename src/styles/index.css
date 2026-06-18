@@ -875,6 +875,67 @@ button:disabled {
   color: var(--color-accent);
 }
 
+.finger-status {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 3;
+  max-width: min(360px, calc(100% - 32px));
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(248, 245, 239, 0.88);
+  color: var(--color-text);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+  pointer-events: none;
+  box-shadow: 0 0 10px 2px rgba(58, 58, 58, 0.1);
+}
+
+.finger-pointer {
+  position: absolute;
+  z-index: 4;
+  width: 54px;
+  height: 54px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.finger-pointer-dot,
+.finger-pointer-ring {
+  position: absolute;
+  inset: 50%;
+  border-radius: var(--radius-pill);
+  transform: translate(-50%, -50%);
+}
+
+.finger-pointer-dot {
+  width: 18px;
+  height: 18px;
+  background: #ffffff;
+  border: 5px solid var(--color-accent);
+  box-shadow: 0 0 0 4px rgba(58, 58, 58, 0.18);
+}
+
+.finger-pointer-ring {
+  width: 54px;
+  height: 54px;
+  border: 4px solid rgba(224, 122, 95, 0.78);
+  animation: finger-pulse 900ms ease-out infinite;
+}
+
+@keyframes finger-pulse {
+  from {
+    opacity: 0.9;
+    transform: translate(-50%, -50%) scale(0.68);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.16);
+  }
+}
+
 .webcam-control-panel {
   display: flex;
   flex-direction: column;
@@ -1096,6 +1157,30 @@ button:disabled {
     padding: 0 10px;
     font-size: 18px;
     line-height: 32px;
+  }
+
+  .finger-status {
+    right: 10px;
+    bottom: 10px;
+    max-width: calc(100% - 20px);
+    font-size: 14px;
+  }
+
+  .finger-pointer {
+    width: 44px;
+    height: 44px;
+  }
+
+  .finger-pointer-dot {
+    width: 16px;
+    height: 16px;
+    border-width: 4px;
+  }
+
+  .finger-pointer-ring {
+    width: 44px;
+    height: 44px;
+    border-width: 3px;
   }
 
   .reading-tts-bar {

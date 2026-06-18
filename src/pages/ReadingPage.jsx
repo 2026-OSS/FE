@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { getReadingStatus } from '../api/vision'
 import { Button } from '../components/common'
 import logoImage from '../assets/logo.png'
 import ttsGuideImage from '../assets/tts.png'
@@ -27,7 +28,144 @@ const CAMERA_MESSAGES = {
   [CAMERA_STATUS.ERROR]: '카메라를 불러오지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해주세요.',
 }
 
-const detectedObjects = []
+const VISION_POLL_INTERVAL = 150
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max)
+
+const toFiniteNumber = (value) => {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+const getNestedValue = (source, keys) => {
+  for (const key of keys) {
+    if (source?.[key] !== undefined && source?.[key] !== null) {
+      return source[key]
+    }
+  }
+
+  return null
+}
+
+const getFrameSize = (source) => {
+  const width = toFiniteNumber(
+    getNestedValue(source, ['frameWidth', 'imageWidth', 'videoWidth', 'sourceWidth', 'width']),
+  )
+  const height = toFiniteNumber(
+    getNestedValue(source, ['frameHeight', 'imageHeight', 'videoHeight', 'sourceHeight', 'height']),
+  )
+
+  return { width, height }
+}
+
+const mapPointToFrame = ({ x, y, sourceWidth, sourceHeight, frameWidth, frameHeight, mirrored = true }) => {
+  if ([x, y, sourceWidth, sourceHeight, frameWidth, frameHeight].some((value) => !Number.isFinite(value))) {
+    return null
+  }
+
+  const resolvedX = x <= 1 && y <= 1 ? x * sourceWidth : x
+  const resolvedY = x <= 1 && y <= 1 ? y * sourceHeight : y
+  const scale = Math.max(frameWidth / sourceWidth, frameHeight / sourceHeight)
+  const displayedWidth = sourceWidth * scale
+  const displayedHeight = sourceHeight * scale
+  const offsetX = (frameWidth - displayedWidth) / 2
+  const offsetY = (frameHeight - displayedHeight) / 2
+  const mappedX = offsetX + resolvedX * scale
+  const mappedY = offsetY + resolvedY * scale
+
+  return {
+    x: clamp(mirrored ? frameWidth - mappedX : mappedX, 0, frameWidth),
+    y: clamp(mappedY, 0, frameHeight),
+  }
+}
+
+const mapBoxToFrame = ({ box, sourceWidth, sourceHeight, frameWidth, frameHeight, mirrored = true }) => {
+  const x = toFiniteNumber(getNestedValue(box, ['x', 'left']))
+  const y = toFiniteNumber(getNestedValue(box, ['y', 'top']))
+  const width = toFiniteNumber(getNestedValue(box, ['width', 'w']))
+  const height = toFiniteNumber(getNestedValue(box, ['height', 'h']))
+
+  if ([x, y, width, height].some((value) => value === null)) {
+    return null
+  }
+
+  const start = mapPointToFrame({ x, y, sourceWidth, sourceHeight, frameWidth, frameHeight, mirrored })
+  const end = mapPointToFrame({
+    x: x + width,
+    y: y + height,
+    sourceWidth,
+    sourceHeight,
+    frameWidth,
+    frameHeight,
+    mirrored,
+  })
+
+  if (!start || !end) {
+    return null
+  }
+
+  const left = Math.min(start.x, end.x)
+  const top = Math.min(start.y, end.y)
+
+  return {
+    left: `${left}px`,
+    top: `${top}px`,
+    width: `${Math.abs(end.x - start.x)}px`,
+    height: `${Math.abs(end.y - start.y)}px`,
+  }
+}
+
+const normalizeFingerTip = (payload) => {
+  const source =
+    payload?.fingerTip ||
+    payload?.fingertip ||
+    payload?.finger ||
+    payload?.hand?.fingerTip ||
+    payload?.hand?.indexFingerTip ||
+    payload?.hand ||
+    null
+
+  if (!source) {
+    return null
+  }
+
+  const x = toFiniteNumber(getNestedValue(source, ['x', 'cx', 'centerX']))
+  const y = toFiniteNumber(getNestedValue(source, ['y', 'cy', 'centerY']))
+  const hasCoordinate = x !== null && y !== null
+  const detected = getNestedValue(source, ['detected', 'isDetected', 'visible', 'tracked'])
+
+  if (detected === false || !hasCoordinate) {
+    return null
+  }
+
+  return {
+    x,
+    y,
+    ...getFrameSize(source),
+  }
+}
+
+const normalizeObjects = (payload) => {
+  const objects = payload?.objects || payload?.detectedObjects || payload?.detections || []
+
+  if (!Array.isArray(objects)) {
+    return []
+  }
+
+  return objects
+    .map((object, index) => {
+      const box = object?.bbox || object?.box || object?.boundingBox || object
+
+      return {
+        id: object?.id || object?.label || `object-${index}`,
+        label: object?.label || object?.name || '객체',
+        variant: index % 2 === 0 ? 'primary' : 'accent',
+        box,
+        ...getFrameSize(object),
+      }
+    })
+    .filter((object) => object.box)
+}
 
 function CheckIcon() {
   return (
@@ -111,8 +249,15 @@ function ProgressStep({ label, status }) {
 function ReadingPage() {
   const navigate = useNavigate()
   const videoRef = useRef(null)
+  const frameRef = useRef(null)
   const streamRef = useRef(null)
   const [cameraStatus, setCameraStatus] = useState(CAMERA_STATUS.IDLE)
+  const [visionStatus, setVisionStatus] = useState({
+    isConnected: false,
+    fingerTip: null,
+    objects: [],
+    updatedAt: null,
+  })
 
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
@@ -124,6 +269,12 @@ function ReadingPage() {
       videoRef.current.srcObject = null
     }
 
+    setVisionStatus({
+      isConnected: false,
+      fingerTip: null,
+      objects: [],
+      updatedAt: null,
+    })
     setCameraStatus(CAMERA_STATUS.IDLE)
   }, [])
 
@@ -172,6 +323,121 @@ function ReadingPage() {
     }
   }, [])
 
+  useEffect(() => {
+    if (cameraStatus !== CAMERA_STATUS.ACTIVE) {
+      return undefined
+    }
+
+    let isCancelled = false
+    let pollTimer = null
+
+    const pollReadingStatus = async () => {
+      try {
+        const payload = await getReadingStatus()
+
+        if (isCancelled) {
+          return
+        }
+
+        setVisionStatus({
+          isConnected: true,
+          fingerTip: normalizeFingerTip(payload),
+          objects: normalizeObjects(payload),
+          updatedAt: Date.now(),
+        })
+      } catch (error) {
+        if (!isCancelled) {
+          setVisionStatus((current) => ({
+            ...current,
+            isConnected: false,
+            fingerTip: null,
+            objects: [],
+            updatedAt: Date.now(),
+          }))
+        }
+      } finally {
+        if (!isCancelled) {
+          pollTimer = window.setTimeout(pollReadingStatus, VISION_POLL_INTERVAL)
+        }
+      }
+    }
+
+    pollReadingStatus()
+
+    return () => {
+      isCancelled = true
+      window.clearTimeout(pollTimer)
+    }
+  }, [cameraStatus])
+
+  const getVideoFrameSize = useCallback(
+    (sourceWidth, sourceHeight) => {
+      const frame = frameRef.current
+      const video = videoRef.current
+
+      if (!frame || !video) {
+        return null
+      }
+
+      const frameRect = frame.getBoundingClientRect()
+      const width = sourceWidth || video.videoWidth
+      const height = sourceHeight || video.videoHeight
+
+      if (!frameRect.width || !frameRect.height || !width || !height) {
+        return null
+      }
+
+      return {
+        frameWidth: frameRect.width,
+        frameHeight: frameRect.height,
+        sourceWidth: width,
+        sourceHeight: height,
+      }
+    },
+    [],
+  )
+
+  const fingerTipStyle = (() => {
+    if (!visionStatus.fingerTip) {
+      return null
+    }
+
+    const dimensions = getVideoFrameSize(visionStatus.fingerTip.width, visionStatus.fingerTip.height)
+
+    if (!dimensions) {
+      return null
+    }
+
+    const point = mapPointToFrame({
+      x: visionStatus.fingerTip.x,
+      y: visionStatus.fingerTip.y,
+      ...dimensions,
+    })
+
+    if (!point) {
+      return null
+    }
+
+    return {
+      left: `${point.x}px`,
+      top: `${point.y}px`,
+    }
+  })()
+
+  const renderedObjects = visionStatus.objects
+    .map((object) => {
+      const dimensions = getVideoFrameSize(object.width, object.height)
+      const style =
+        dimensions &&
+        mapBoxToFrame({
+          box: object.box,
+          ...dimensions,
+        })
+
+      return style ? { ...object, style } : null
+    })
+    .filter(Boolean)
+
   const isLoading = cameraStatus === CAMERA_STATUS.LOADING
   const isActive = cameraStatus === CAMERA_STATUS.ACTIVE
   const hasMessage = cameraStatus !== CAMERA_STATUS.ACTIVE
@@ -180,6 +446,15 @@ function ReadingPage() {
   const overlayIcon = isFailStatus ? <CloseIcon /> : isWarningStatus ? <AlertIcon /> : <CameraIcon />
 
   const webcamStepStatus = isActive ? 'success' : isFailStatus ? 'fail' : 'warning'
+  const objectStepStatus = renderedObjects.length > 0 ? 'success' : 'warning'
+  const fingerStepStatus = fingerTipStyle ? 'success' : 'warning'
+  const fingerStatusMessage = !isActive
+    ? '카메라 시작 후 손끝 위치를 확인합니다.'
+    : fingerTipStyle
+      ? '손끝 위치를 추적 중입니다.'
+      : visionStatus.isConnected
+        ? '손끝이 감지되지 않았습니다.'
+        : '백엔드 추적 데이터를 기다리고 있습니다.'
 
   return (
     <div className="reading-page">
@@ -200,15 +475,15 @@ function ReadingPage() {
         <section className="reading-progress" aria-label="독서 보조 진행 상태">
           <ProgressStep label="웹캠 인식" status={webcamStepStatus} />
           <span className={`reading-step-line reading-step-line-${webcamStepStatus}`} />
-          <ProgressStep label="객체 탐지" status="warning" />
-          <span className="reading-step-line reading-step-line-warning" />
-          <ProgressStep label="손끝 추적" status="warning" />
-          <span className="reading-step-line reading-step-line-warning" />
+          <ProgressStep label="객체 탐지" status={objectStepStatus} />
+          <span className={`reading-step-line reading-step-line-${objectStepStatus}`} />
+          <ProgressStep label="손끝 추적" status={fingerStepStatus} />
+          <span className={`reading-step-line reading-step-line-${fingerStepStatus}`} />
           <ProgressStep label="TTS 음성 안내" status="warning" />
         </section>
 
         <section className="webcam-stage" aria-label="실시간 웹캠 화면">
-          <div className={`webcam-frame ${isActive ? 'webcam-frame-active' : ''}`}>
+          <div ref={frameRef} className={`webcam-frame ${isActive ? 'webcam-frame-active' : ''}`}>
             <video ref={videoRef} className="webcam-video" playsInline muted aria-label="실시간 카메라 영상" />
 
             {isLoading && (
@@ -232,7 +507,20 @@ function ReadingPage() {
               </div>
             )}
 
-            {detectedObjects.map((object) => (
+            {isActive && (
+              <div className="finger-status" role="status" aria-live="polite">
+                {fingerStatusMessage}
+              </div>
+            )}
+
+            {fingerTipStyle && (
+              <div className="finger-pointer" style={fingerTipStyle} aria-label="감지된 손끝 위치">
+                <span className="finger-pointer-dot" />
+                <span className="finger-pointer-ring" />
+              </div>
+            )}
+
+            {renderedObjects.map((object) => (
               <div
                 key={object.id}
                 className={`detection-box detection-box-${object.variant}`}
