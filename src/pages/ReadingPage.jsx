@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getReadingStatus } from '../api/vision'
+import { detectInteraction } from '../api/vision'
 import { Button } from '../components/common'
 import logoImage from '../assets/logo.png'
 import ttsGuideImage from '../assets/tts.png'
@@ -28,7 +28,8 @@ const CAMERA_MESSAGES = {
   [CAMERA_STATUS.ERROR]: '카메라를 불러오지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해주세요.',
 }
 
-const VISION_POLL_INTERVAL = 150
+const VISION_POLL_INTERVAL = 1200
+const DEFAULT_VOICE_TYPE = import.meta.env.VITE_VOICE_TYPE || 'child'
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max)
 
@@ -80,10 +81,15 @@ const mapPointToFrame = ({ x, y, sourceWidth, sourceHeight, frameWidth, frameHei
 }
 
 const mapBoxToFrame = ({ box, sourceWidth, sourceHeight, frameWidth, frameHeight, mirrored = true }) => {
-  const x = toFiniteNumber(getNestedValue(box, ['x', 'left']))
-  const y = toFiniteNumber(getNestedValue(box, ['y', 'top']))
-  const width = toFiniteNumber(getNestedValue(box, ['width', 'w']))
-  const height = toFiniteNumber(getNestedValue(box, ['height', 'h']))
+  const isBboxArray = Array.isArray(box) && box.length >= 4
+  const x1 = isBboxArray ? toFiniteNumber(box[0]) : null
+  const y1 = isBboxArray ? toFiniteNumber(box[1]) : null
+  const x2 = isBboxArray ? toFiniteNumber(box[2]) : null
+  const y2 = isBboxArray ? toFiniteNumber(box[3]) : null
+  const x = isBboxArray ? x1 : toFiniteNumber(getNestedValue(box, ['x', 'left']))
+  const y = isBboxArray ? y1 : toFiniteNumber(getNestedValue(box, ['y', 'top']))
+  const width = isBboxArray ? x2 - x1 : toFiniteNumber(getNestedValue(box, ['width', 'w']))
+  const height = isBboxArray ? y2 - y1 : toFiniteNumber(getNestedValue(box, ['height', 'h']))
 
   if ([x, y, width, height].some((value) => value === null)) {
     return null
@@ -250,12 +256,17 @@ function ReadingPage() {
   const navigate = useNavigate()
   const videoRef = useRef(null)
   const frameRef = useRef(null)
+  const canvasRef = useRef(null)
   const streamRef = useRef(null)
+  const lastSpokenTextRef = useRef('')
   const [cameraStatus, setCameraStatus] = useState(CAMERA_STATUS.IDLE)
   const [visionStatus, setVisionStatus] = useState({
     isConnected: false,
     fingerTip: null,
     objects: [],
+    result: null,
+    message: '',
+    ttsText: '',
     updatedAt: null,
   })
 
@@ -273,6 +284,9 @@ function ReadingPage() {
       isConnected: false,
       fingerTip: null,
       objects: [],
+      result: null,
+      message: '',
+      ttsText: '',
       updatedAt: null,
     })
     setCameraStatus(CAMERA_STATUS.IDLE)
@@ -323,6 +337,33 @@ function ReadingPage() {
     }
   }, [])
 
+  const captureCurrentFrame = useCallback(
+    () =>
+      new Promise((resolve) => {
+        const video = videoRef.current
+
+        if (!video?.videoWidth || !video?.videoHeight) {
+          resolve(null)
+          return
+        }
+
+        const canvas = canvasRef.current || document.createElement('canvas')
+        canvasRef.current = canvas
+        canvas.width = video.videoWidth
+        canvas.height = video.videoHeight
+
+        const context = canvas.getContext('2d')
+        if (!context) {
+          resolve(null)
+          return
+        }
+
+        context.drawImage(video, 0, 0, canvas.width, canvas.height)
+        canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.82)
+      }),
+    [],
+  )
+
   useEffect(() => {
     if (cameraStatus !== CAMERA_STATUS.ACTIVE) {
       return undefined
@@ -333,7 +374,16 @@ function ReadingPage() {
 
     const pollReadingStatus = async () => {
       try {
-        const payload = await getReadingStatus()
+        const frame = await captureCurrentFrame()
+
+        if (!frame) {
+          throw new Error('카메라 프레임을 캡처하지 못했습니다.')
+        }
+
+        const payload = await detectInteraction({
+          frame,
+          voiceType: DEFAULT_VOICE_TYPE,
+        })
 
         if (isCancelled) {
           return
@@ -343,6 +393,9 @@ function ReadingPage() {
           isConnected: true,
           fingerTip: normalizeFingerTip(payload),
           objects: normalizeObjects(payload),
+          result: payload,
+          message: payload?.message || '',
+          ttsText: payload?.ttsText || payload?.description || '',
           updatedAt: Date.now(),
         })
       } catch (error) {
@@ -352,6 +405,7 @@ function ReadingPage() {
             isConnected: false,
             fingerTip: null,
             objects: [],
+            message: '백엔드 인식 결과를 기다리고 있습니다.',
             updatedAt: Date.now(),
           }))
         }
@@ -368,7 +422,30 @@ function ReadingPage() {
       isCancelled = true
       window.clearTimeout(pollTimer)
     }
-  }, [cameraStatus])
+  }, [cameraStatus, captureCurrentFrame])
+
+  const speakText = useCallback((text) => {
+    if (!text || !window.speechSynthesis) {
+      return
+    }
+
+    window.speechSynthesis.cancel()
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.lang = 'ko-KR'
+    utterance.rate = 0.92
+    window.speechSynthesis.speak(utterance)
+  }, [])
+
+  useEffect(() => {
+    const text = visionStatus.ttsText
+
+    if (!text || text === lastSpokenTextRef.current) {
+      return
+    }
+
+    lastSpokenTextRef.current = text
+    speakText(text)
+  }, [speakText, visionStatus.ttsText])
 
   const getVideoFrameSize = useCallback(
     (sourceWidth, sourceHeight) => {
@@ -446,15 +523,19 @@ function ReadingPage() {
   const overlayIcon = isFailStatus ? <CloseIcon /> : isWarningStatus ? <AlertIcon /> : <CameraIcon />
 
   const webcamStepStatus = isActive ? 'success' : isFailStatus ? 'fail' : 'warning'
-  const objectStepStatus = renderedObjects.length > 0 ? 'success' : 'warning'
-  const fingerStepStatus = fingerTipStyle ? 'success' : 'warning'
+  const hasMatchedResult = visionStatus.result?.matched === true
+  const objectStepStatus = renderedObjects.length > 0 || hasMatchedResult ? 'success' : 'warning'
+  const fingerStepStatus = fingerTipStyle || hasMatchedResult ? 'success' : 'warning'
+  const ttsStepStatus = visionStatus.ttsText ? 'success' : 'warning'
+  const resultText =
+    visionStatus.ttsText ||
+    visionStatus.message ||
+    '웹캠으로 책과 놀이도구를 비추면 AI가 인식 결과를 음성으로 안내합니다.'
   const fingerStatusMessage = !isActive
     ? '카메라 시작 후 손끝 위치를 확인합니다.'
     : fingerTipStyle
       ? '손끝 위치를 추적 중입니다.'
-      : visionStatus.isConnected
-        ? '손끝이 감지되지 않았습니다.'
-        : '백엔드 추적 데이터를 기다리고 있습니다.'
+      : visionStatus.message || (visionStatus.isConnected ? '손끝이 감지되지 않았습니다.' : '백엔드 인식 결과를 기다리고 있습니다.')
 
   return (
     <div className="reading-page">
@@ -479,7 +560,7 @@ function ReadingPage() {
           <span className={`reading-step-line reading-step-line-${objectStepStatus}`} />
           <ProgressStep label="손끝 추적" status={fingerStepStatus} />
           <span className={`reading-step-line reading-step-line-${fingerStepStatus}`} />
-          <ProgressStep label="TTS 음성 안내" status="warning" />
+          <ProgressStep label="TTS 음성 안내" status={ttsStepStatus} />
         </section>
 
         <section className="webcam-stage" aria-label="실시간 웹캠 화면">
@@ -565,8 +646,15 @@ function ReadingPage() {
       <footer className="reading-tts-bar">
         <div className="reading-tts-inner">
           <img className="reading-tts-guide-image" src={ttsGuideImage} alt="음성 안내 캐릭터" />
-          <p>웹캠으로 책과 교구를 비추면 AI가 인식 결과를 음성으로 안내합니다.</p>
-          <Button variant="primary" size="md" icon={<ReplayIcon />} iconPosition="left">
+          <p>{resultText}</p>
+          <Button
+            variant="primary"
+            size="md"
+            icon={<ReplayIcon />}
+            iconPosition="left"
+            onClick={() => speakText(resultText)}
+            disabled={!visionStatus.ttsText && !visionStatus.message}
+          >
             설명 다시 듣기
           </Button>
         </div>
