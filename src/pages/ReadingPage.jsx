@@ -30,6 +30,14 @@ const CAMERA_MESSAGES = {
 
 const VISION_POLL_INTERVAL = 1200
 const DEFAULT_VOICE_TYPE = import.meta.env.VITE_VOICE_TYPE || 'child'
+const VOICE_OPTIONS = [
+  { value: 'child', label: '아이', pitch: 1.25, rate: 0.95 },
+  { value: 'mom', label: '엄마', pitch: 1.05, rate: 0.92 },
+  { value: 'dad', label: '아빠', pitch: 0.82, rate: 0.88 },
+]
+
+const getVoiceOption = (voiceType) =>
+  VOICE_OPTIONS.find((option) => option.value === voiceType) || VOICE_OPTIONS[0]
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max)
 
@@ -259,6 +267,7 @@ function ReadingPage() {
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
   const lastSpokenTextRef = useRef('')
+  const [voiceType, setVoiceType] = useState(getVoiceOption(DEFAULT_VOICE_TYPE).value)
   const [cameraStatus, setCameraStatus] = useState(CAMERA_STATUS.IDLE)
   const [visionStatus, setVisionStatus] = useState({
     isConnected: false,
@@ -329,6 +338,11 @@ function ReadingPage() {
     }
   }, [])
 
+  const handleVoiceTypeChange = useCallback((nextVoiceType) => {
+    lastSpokenTextRef.current = ''
+    setVoiceType(nextVoiceType)
+  }, [])
+
   useEffect(() => {
     return () => {
       if (streamRef.current) {
@@ -382,7 +396,7 @@ function ReadingPage() {
 
         const payload = await detectInteraction({
           frame,
-          voiceType: DEFAULT_VOICE_TYPE,
+          voiceType,
         })
 
         if (isCancelled) {
@@ -422,19 +436,21 @@ function ReadingPage() {
       isCancelled = true
       window.clearTimeout(pollTimer)
     }
-  }, [cameraStatus, captureCurrentFrame])
+  }, [cameraStatus, captureCurrentFrame, voiceType])
 
-  const speakText = useCallback((text) => {
+  const speakText = useCallback((text, selectedVoiceType = voiceType) => {
     if (!text || !window.speechSynthesis) {
       return
     }
 
     window.speechSynthesis.cancel()
+    const voiceOption = getVoiceOption(selectedVoiceType)
     const utterance = new SpeechSynthesisUtterance(text)
     utterance.lang = 'ko-KR'
-    utterance.rate = 0.92
+    utterance.pitch = voiceOption.pitch
+    utterance.rate = voiceOption.rate
     window.speechSynthesis.speak(utterance)
-  }, [])
+  }, [voiceType])
 
   useEffect(() => {
     const text = visionStatus.ttsText
@@ -444,8 +460,8 @@ function ReadingPage() {
     }
 
     lastSpokenTextRef.current = text
-    speakText(text)
-  }, [speakText, visionStatus.ttsText])
+    speakText(text, voiceType)
+  }, [speakText, visionStatus.ttsText, voiceType])
 
   const getVideoFrameSize = useCallback(
     (sourceWidth, sourceHeight) => {
@@ -616,6 +632,22 @@ function ReadingPage() {
             <p className="webcam-status">
               {isActive ? '카메라가 실행 중입니다.' : '데스크톱 브라우저에서 카메라 권한을 허용해주세요.'}
             </p>
+            <div className="voice-selector" aria-label="TTS 음성 타입 선택">
+              <p className="voice-selector-label">음성 타입</p>
+              <div className="voice-selector-options">
+                {VOICE_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    className={`voice-option ${voiceType === option.value ? 'voice-option-active' : ''}`}
+                    type="button"
+                    aria-pressed={voiceType === option.value}
+                    onClick={() => handleVoiceTypeChange(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="webcam-actions">
               <Button
                 variant="primary"

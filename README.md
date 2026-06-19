@@ -74,4 +74,4 @@ curl http://127.0.0.1:8001/health
 Frontend -> Backend -> AI 서버 -> Backend -> Frontend
 ```
 
-현재 TTS는 브라우저 기본 `speechSynthesis`를 사용합니다.
+현재 TTS는 브라우저 기본 `speechSynthesis`를 사용합니다. 독서 화면에서 아이, 엄마, 아빠 음성 타입을 선택할 수 있습니다.
