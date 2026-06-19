@@ -772,6 +772,10 @@ button:disabled {
   transform: scaleX(-1);
 }
 
+.webcam-media-hidden {
+  display: none;
+}
+
 .webcam-overlay {
   position: absolute;
   inset: 0;
@@ -955,6 +959,108 @@ button:disabled {
   color: var(--color-text);
   font-size: 18px;
   line-height: 1.6;
+}
+
+.camera-source-selector {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.camera-source-option {
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--color-text);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.3;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    opacity 160ms ease;
+}
+
+.camera-source-option-active {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-surface);
+}
+
+.camera-source-option:disabled {
+  opacity: 0.72;
+}
+
+.camera-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.camera-selector-label {
+  color: var(--color-sub-text);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.camera-selector-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  gap: 8px;
+}
+
+.camera-selector-control {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--color-text);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.camera-selector-control:disabled {
+  opacity: 0.72;
+}
+
+.camera-refresh-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--color-text);
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    opacity 160ms ease;
+}
+
+.camera-refresh-button:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-surface);
+}
+
+.camera-refresh-button:disabled {
+  opacity: 0.56;
+}
+
+.camera-refresh-button svg {
+  width: 22px;
+  height: 22px;
 }
 
 .voice-selector {

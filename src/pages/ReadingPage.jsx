@@ -16,20 +16,56 @@ const CAMERA_STATUS = {
   LOADING: 'loading',
   ACTIVE: 'active',
   DENIED: 'denied',
+  INSECURE_CONTEXT: 'insecure-context',
   UNSUPPORTED: 'unsupported',
   ERROR: 'error',
+}
+
+const CAMERA_SOURCE = {
+  DEVICE: 'device',
+  STREAM: 'stream',
 }
 
 const CAMERA_MESSAGES = {
   [CAMERA_STATUS.IDLE]: '카메라를 시작하면 실시간 화면이 여기에 표시됩니다.',
   [CAMERA_STATUS.LOADING]: '카메라 권한을 확인하고 있어요.',
   [CAMERA_STATUS.DENIED]: '카메라 권한이 거부되었습니다. 브라우저 설정에서 카메라 접근을 허용해주세요.',
+  [CAMERA_STATUS.INSECURE_CONTEXT]: '휴대폰 브라우저에서는 HTTPS 주소로 접속해야 카메라를 사용할 수 있습니다.',
   [CAMERA_STATUS.UNSUPPORTED]: '현재 브라우저에서는 카메라 기능을 지원하지 않습니다.',
   [CAMERA_STATUS.ERROR]: '카메라를 불러오지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해주세요.',
 }
 
 const VISION_POLL_INTERVAL = 1200
 const DEFAULT_VOICE_TYPE = import.meta.env.VITE_VOICE_TYPE || 'child'
+const DEFAULT_CAMERA_STREAM_URL = import.meta.env.VITE_CAMERA_STREAM_URL || ''
+const CUSTOM_CAMERA_KEYWORDS = (import.meta.env.VITE_PREFERRED_CAMERA_KEYWORDS || '')
+  .split(',')
+  .map((keyword) => keyword.trim().toLowerCase())
+  .filter(Boolean)
+const CAMERA_RESOLUTION = {
+  width: { ideal: 1280 },
+  height: { ideal: 720 },
+}
+const IPHONE_CONTINUITY_CAMERA_KEYWORDS = [
+  'iphone',
+  'continuity',
+  'continuity camera',
+  '아이폰',
+]
+const PHONE_CAMERA_KEYWORDS = [
+  'ipad',
+  'android',
+  'phone',
+  'droidcam',
+  'camo',
+  'epoccam',
+  'iriun',
+  '휴대폰',
+  '핸드폰',
+  '폰',
+]
+const REAR_CAMERA_KEYWORDS = ['back', 'rear', 'environment', 'wide', 'ultra', '후면', '뒷면', '환경']
+const FRONT_OR_BUILT_IN_CAMERA_KEYWORDS = ['front', 'user', 'facetime', 'built-in', 'macbook', '전면']
 const VOICE_OPTIONS = [
   { value: 'child', label: '아이', pitch: 1.25, rate: 0.95 },
   { value: 'mom', label: '엄마', pitch: 1.05, rate: 0.92 },
@@ -38,6 +74,110 @@ const VOICE_OPTIONS = [
 
 const getVoiceOption = (voiceType) =>
   VOICE_OPTIONS.find((option) => option.value === voiceType) || VOICE_OPTIONS[0]
+
+const isCameraSecureContext = () => window.isSecureContext || window.location.hostname === 'localhost'
+
+const getPreferredCameraScore = (device) => {
+  const label = device.label.toLowerCase()
+  let score = 0
+
+  CUSTOM_CAMERA_KEYWORDS.forEach((keyword) => {
+    if (label.includes(keyword)) {
+      score += 300
+    }
+  })
+
+  IPHONE_CONTINUITY_CAMERA_KEYWORDS.forEach((keyword) => {
+    if (label.includes(keyword)) {
+      score += 200
+    }
+  })
+
+  PHONE_CAMERA_KEYWORDS.forEach((keyword) => {
+    if (label.includes(keyword)) {
+      score += 100
+    }
+  })
+
+  REAR_CAMERA_KEYWORDS.forEach((keyword) => {
+    if (label.includes(keyword)) {
+      score += 60
+    }
+  })
+
+  FRONT_OR_BUILT_IN_CAMERA_KEYWORDS.forEach((keyword) => {
+    if (label.includes(keyword)) {
+      score -= 80
+    }
+  })
+
+  return score
+}
+
+const stopStreamTracks = (stream) => {
+  stream?.getTracks().forEach((track) => track.stop())
+}
+
+const getAvailableVideoDevices = async ({ requestPermission = false } = {}) => {
+  const fallbackConstraints = {
+    facingMode: { ideal: 'environment' },
+    ...CAMERA_RESOLUTION,
+  }
+
+  if (!navigator.mediaDevices?.enumerateDevices) {
+    return []
+  }
+
+  let permissionProbeStream = null
+
+  try {
+    let devices = await navigator.mediaDevices.enumerateDevices()
+    const labelsAreHidden = devices
+      .filter((device) => device.kind === 'videoinput')
+      .some((device) => !device.label)
+
+    if (requestPermission && labelsAreHidden) {
+      permissionProbeStream = await navigator.mediaDevices.getUserMedia({
+        video: fallbackConstraints,
+        audio: false,
+      })
+      devices = await navigator.mediaDevices.enumerateDevices()
+    }
+
+    return devices.filter((device) => device.kind === 'videoinput' && device.deviceId)
+  } finally {
+    stopStreamTracks(permissionProbeStream)
+  }
+}
+
+const getPreferredCameraDevice = (devices) =>
+  devices
+    .map((device, index) => ({
+      device,
+      index,
+      score: getPreferredCameraScore(device),
+    }))
+    .filter((candidate) => candidate.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)[0]?.device
+
+const getCameraDeviceLabel = (device, index) => device.label || `카메라 ${index + 1}`
+
+const getCameraConstraints = (deviceId) => {
+  const fallbackConstraints = {
+    facingMode: { ideal: 'environment' },
+    ...CAMERA_RESOLUTION,
+  }
+
+  if (!deviceId) {
+    return fallbackConstraints
+  }
+
+  return {
+    deviceId: { exact: deviceId },
+    facingMode: { ideal: 'environment' },
+    ...CAMERA_RESOLUTION,
+  }
+}
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max)
 
@@ -247,6 +387,17 @@ function ReplayIcon() {
   )
 }
 
+function RefreshIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path
+        d="M12 5C9.87827 5 7.97378 5.92978 6.67408 7.4H9V9.4H3.4V3.8H5.4V5.9102C7.04937 4.12032 9.40023 3 12 3C15.6429 3 18.7798 5.16344 20.1939 8.27578L18.3734 9.1033C17.2736 6.68328 14.8334 5 12 5ZM5.62662 14.8967C6.72636 17.3167 9.16659 19 12 19C14.1217 19 16.0262 18.0702 17.3259 16.6H15V14.6H20.6V20.2H18.6V18.0898C16.9506 19.8797 14.5998 21 12 21C8.35706 21 5.22024 18.8366 3.80615 15.7242L5.62662 14.8967Z"
+        fill="currentColor"
+      />
+    </svg>
+  )
+}
+
 function ProgressStep({ label, status }) {
   const icon = status === 'success' ? <CheckIcon /> : status === 'fail' ? <CloseIcon /> : <AlertIcon />
 
@@ -263,12 +414,20 @@ function ProgressStep({ label, status }) {
 function ReadingPage() {
   const navigate = useNavigate()
   const videoRef = useRef(null)
+  const streamImageRef = useRef(null)
   const frameRef = useRef(null)
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
   const lastSpokenTextRef = useRef('')
   const [voiceType, setVoiceType] = useState(getVoiceOption(DEFAULT_VOICE_TYPE).value)
   const [cameraStatus, setCameraStatus] = useState(CAMERA_STATUS.IDLE)
+  const [cameraDevices, setCameraDevices] = useState([])
+  const [selectedCameraId, setSelectedCameraId] = useState('')
+  const [isRefreshingDevices, setIsRefreshingDevices] = useState(false)
+  const [cameraSource, setCameraSource] = useState(
+    DEFAULT_CAMERA_STREAM_URL ? CAMERA_SOURCE.STREAM : CAMERA_SOURCE.DEVICE,
+  )
+  const [cameraStreamUrl, setCameraStreamUrl] = useState(DEFAULT_CAMERA_STREAM_URL)
   const [visionStatus, setVisionStatus] = useState({
     isConnected: false,
     fingerTip: null,
@@ -280,13 +439,15 @@ function ReadingPage() {
   })
 
   const stopCamera = useCallback(() => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop())
-      streamRef.current = null
-    }
+    stopStreamTracks(streamRef.current)
+    streamRef.current = null
 
     if (videoRef.current) {
       videoRef.current.srcObject = null
+    }
+
+    if (streamImageRef.current) {
+      streamImageRef.current.removeAttribute('src')
     }
 
     setVisionStatus({
@@ -301,7 +462,64 @@ function ReadingPage() {
     setCameraStatus(CAMERA_STATUS.IDLE)
   }, [])
 
-  const startCamera = useCallback(async () => {
+  const refreshCameraDevices = useCallback(async (options) => {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      setCameraDevices([])
+      return []
+    }
+
+    const devices = await getAvailableVideoDevices(options)
+    setCameraDevices(devices)
+    setSelectedCameraId((currentCameraId) => {
+      if (currentCameraId && devices.some((device) => device.deviceId === currentCameraId)) {
+        return currentCameraId
+      }
+
+      return getPreferredCameraDevice(devices)?.deviceId || devices[0]?.deviceId || ''
+    })
+
+    return devices
+  }, [])
+
+  const handleRefreshCameraDevices = useCallback(async () => {
+    setIsRefreshingDevices(true)
+
+    try {
+      await refreshCameraDevices({ requestPermission: true })
+    } catch (error) {
+      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        setCameraStatus(CAMERA_STATUS.DENIED)
+      } else {
+        setCameraDevices([])
+      }
+    } finally {
+      setIsRefreshingDevices(false)
+    }
+  }, [refreshCameraDevices])
+
+  const startCamera = useCallback(async (cameraId = selectedCameraId) => {
+    if (cameraSource === CAMERA_SOURCE.STREAM) {
+      if (!cameraStreamUrl.trim()) {
+        setCameraStatus(CAMERA_STATUS.ERROR)
+        return
+      }
+
+      stopStreamTracks(streamRef.current)
+      streamRef.current = null
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = null
+      }
+
+      setCameraStatus(CAMERA_STATUS.ACTIVE)
+      return
+    }
+
+    if (!isCameraSecureContext()) {
+      setCameraStatus(CAMERA_STATUS.INSECURE_CONTEXT)
+      return
+    }
+
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraStatus(CAMERA_STATUS.UNSUPPORTED)
       return
@@ -310,14 +528,49 @@ function ReadingPage() {
     setCameraStatus(CAMERA_STATUS.LOADING)
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
-      })
+      stopStreamTracks(streamRef.current)
+      streamRef.current = null
+
+      const devices = await refreshCameraDevices({ requestPermission: true })
+      const selectedDevice = devices.find((device) => device.deviceId === cameraId)
+      const preferredDevice = selectedDevice || getPreferredCameraDevice(devices)
+      const videoConstraints = getCameraConstraints(preferredDevice?.deviceId)
+      let stream
+      let openedPreferredDevice = false
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: videoConstraints,
+          audio: false,
+        })
+        openedPreferredDevice = Boolean(videoConstraints.deviceId)
+      } catch (error) {
+        if (!videoConstraints.deviceId) {
+          throw error
+        }
+
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              deviceId: videoConstraints.deviceId,
+            },
+            audio: false,
+          })
+          openedPreferredDevice = true
+        } catch {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: { ideal: 'environment' },
+              ...CAMERA_RESOLUTION,
+            },
+            audio: false,
+          })
+        }
+      }
+
+      if (openedPreferredDevice && preferredDevice?.deviceId) {
+        setSelectedCameraId(preferredDevice.deviceId)
+      }
 
       streamRef.current = stream
 
@@ -336,35 +589,91 @@ function ReadingPage() {
         setCameraStatus(CAMERA_STATUS.ERROR)
       }
     }
-  }, [])
+  }, [cameraSource, cameraStreamUrl, refreshCameraDevices, selectedCameraId])
 
   const handleVoiceTypeChange = useCallback((nextVoiceType) => {
     lastSpokenTextRef.current = ''
     setVoiceType(nextVoiceType)
   }, [])
 
+  const handleCameraSourceChange = useCallback((nextCameraSource) => {
+    setCameraSource(nextCameraSource)
+    setCameraStatus(CAMERA_STATUS.IDLE)
+    setVisionStatus({
+      isConnected: false,
+      fingerTip: null,
+      objects: [],
+      result: null,
+      message: '',
+      ttsText: '',
+      updatedAt: null,
+    })
+  }, [])
+
+  const handleCameraDeviceChange = useCallback(
+    async (event) => {
+      const nextCameraId = event.target.value
+      setSelectedCameraId(nextCameraId)
+
+      if (cameraStatus === CAMERA_STATUS.ACTIVE) {
+        await startCamera(nextCameraId)
+      }
+    },
+    [cameraStatus, startCamera],
+  )
+
+  const handleCameraStreamUrlChange = useCallback((event) => {
+    setCameraStreamUrl(event.target.value)
+  }, [])
+
+  useEffect(() => {
+    refreshCameraDevices({ requestPermission: false }).catch(() => {
+      setCameraDevices([])
+    })
+  }, [refreshCameraDevices])
+
+  useEffect(() => {
+    if (!navigator.mediaDevices?.addEventListener) {
+      return undefined
+    }
+
+    const handleDeviceChange = () => {
+      refreshCameraDevices({ requestPermission: false }).catch(() => {
+        setCameraDevices([])
+      })
+    }
+
+    navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange)
+
+    return () => {
+      navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange)
+    }
+  }, [refreshCameraDevices])
+
   useEffect(() => {
     return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop())
-      }
+      stopStreamTracks(streamRef.current)
     }
   }, [])
 
   const captureCurrentFrame = useCallback(
     () =>
-      new Promise((resolve) => {
-        const video = videoRef.current
+      new Promise((resolve, reject) => {
+        const source = cameraSource === CAMERA_SOURCE.STREAM ? streamImageRef.current : videoRef.current
+        const sourceWidth =
+          cameraSource === CAMERA_SOURCE.STREAM ? source?.naturalWidth : source?.videoWidth
+        const sourceHeight =
+          cameraSource === CAMERA_SOURCE.STREAM ? source?.naturalHeight : source?.videoHeight
 
-        if (!video?.videoWidth || !video?.videoHeight) {
+        if (!source || !sourceWidth || !sourceHeight) {
           resolve(null)
           return
         }
 
         const canvas = canvasRef.current || document.createElement('canvas')
         canvasRef.current = canvas
-        canvas.width = video.videoWidth
-        canvas.height = video.videoHeight
+        canvas.width = sourceWidth
+        canvas.height = sourceHeight
 
         const context = canvas.getContext('2d')
         if (!context) {
@@ -372,10 +681,14 @@ function ReadingPage() {
           return
         }
 
-        context.drawImage(video, 0, 0, canvas.width, canvas.height)
-        canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.82)
+        try {
+          context.drawImage(source, 0, 0, canvas.width, canvas.height)
+          canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.82)
+        } catch (error) {
+          reject(error)
+        }
       }),
-    [],
+    [cameraSource],
   )
 
   useEffect(() => {
@@ -414,12 +727,17 @@ function ReadingPage() {
         })
       } catch (error) {
         if (!isCancelled) {
+          const nextMessage =
+            error.name === 'SecurityError'
+              ? '스트림 영상은 표시되지만 브라우저 보안 정책 때문에 AI 인식용 프레임을 읽지 못했습니다.'
+              : '백엔드 인식 결과를 기다리고 있습니다.'
+
           setVisionStatus((current) => ({
             ...current,
             isConnected: false,
             fingerTip: null,
             objects: [],
-            message: '백엔드 인식 결과를 기다리고 있습니다.',
+            message: nextMessage,
             updatedAt: Date.now(),
           }))
         }
@@ -467,14 +785,16 @@ function ReadingPage() {
     (sourceWidth, sourceHeight) => {
       const frame = frameRef.current
       const video = videoRef.current
+      const image = streamImageRef.current
+      const source = cameraSource === CAMERA_SOURCE.STREAM ? image : video
 
-      if (!frame || !video) {
+      if (!frame || !source) {
         return null
       }
 
       const frameRect = frame.getBoundingClientRect()
-      const width = sourceWidth || video.videoWidth
-      const height = sourceHeight || video.videoHeight
+      const width = sourceWidth || (cameraSource === CAMERA_SOURCE.STREAM ? image.naturalWidth : video.videoWidth)
+      const height = sourceHeight || (cameraSource === CAMERA_SOURCE.STREAM ? image.naturalHeight : video.videoHeight)
 
       if (!frameRect.width || !frameRect.height || !width || !height) {
         return null
@@ -487,7 +807,7 @@ function ReadingPage() {
         sourceHeight: height,
       }
     },
-    [],
+    [cameraSource],
   )
 
   const fingerTipStyle = (() => {
@@ -535,8 +855,15 @@ function ReadingPage() {
   const isActive = cameraStatus === CAMERA_STATUS.ACTIVE
   const hasMessage = cameraStatus !== CAMERA_STATUS.ACTIVE
   const isFailStatus = cameraStatus === CAMERA_STATUS.DENIED
-  const isWarningStatus = [CAMERA_STATUS.UNSUPPORTED, CAMERA_STATUS.ERROR].includes(cameraStatus)
+  const isWarningStatus = [CAMERA_STATUS.INSECURE_CONTEXT, CAMERA_STATUS.UNSUPPORTED, CAMERA_STATUS.ERROR].includes(cameraStatus)
   const overlayIcon = isFailStatus ? <CloseIcon /> : isWarningStatus ? <AlertIcon /> : <CameraIcon />
+  const cameraControlMessage = isActive
+    ? '카메라가 실행 중입니다.'
+    : cameraStatus === CAMERA_STATUS.INSECURE_CONTEXT
+      ? '휴대폰에서는 HTTPS 주소로 다시 접속한 뒤 카메라 권한을 허용해주세요.'
+      : cameraSource === CAMERA_SOURCE.STREAM
+        ? '휴대폰 카메라 앱의 스트림 URL을 입력한 뒤 카메라를 시작해주세요.'
+        : '휴대폰 카메라를 연결한 뒤 브라우저에서 카메라 권한을 허용해주세요.'
 
   const webcamStepStatus = isActive ? 'success' : isFailStatus ? 'fail' : 'warning'
   const hasMatchedResult = visionStatus.result?.matched === true
@@ -581,7 +908,20 @@ function ReadingPage() {
 
         <section className="webcam-stage" aria-label="실시간 웹캠 화면">
           <div ref={frameRef} className={`webcam-frame ${isActive ? 'webcam-frame-active' : ''}`}>
-            <video ref={videoRef} className="webcam-video" playsInline muted aria-label="실시간 카메라 영상" />
+            <video
+              ref={videoRef}
+              className={`webcam-video ${cameraSource === CAMERA_SOURCE.STREAM ? 'webcam-media-hidden' : ''}`}
+              playsInline
+              muted
+              aria-label="실시간 카메라 영상"
+            />
+            <img
+              ref={streamImageRef}
+              className={`webcam-video ${cameraSource === CAMERA_SOURCE.STREAM ? '' : 'webcam-media-hidden'}`}
+              src={cameraSource === CAMERA_SOURCE.STREAM && isActive ? cameraStreamUrl : undefined}
+              alt=""
+              onError={() => setCameraStatus(CAMERA_STATUS.ERROR)}
+            />
 
             {isLoading && (
               <div className="webcam-overlay" role="status" aria-live="polite">
@@ -629,9 +969,69 @@ function ReadingPage() {
           </div>
 
           <aside className="webcam-control-panel" aria-label="카메라 제어">
-            <p className="webcam-status">
-              {isActive ? '카메라가 실행 중입니다.' : '데스크톱 브라우저에서 카메라 권한을 허용해주세요.'}
-            </p>
+            <p className="webcam-status">{cameraControlMessage}</p>
+            <div className="camera-source-selector" aria-label="카메라 입력 방식 선택">
+              <button
+                className={`camera-source-option ${cameraSource === CAMERA_SOURCE.DEVICE ? 'camera-source-option-active' : ''}`}
+                type="button"
+                onClick={() => handleCameraSourceChange(CAMERA_SOURCE.DEVICE)}
+                disabled={isActive || isLoading}
+                aria-pressed={cameraSource === CAMERA_SOURCE.DEVICE}
+              >
+                브라우저
+              </button>
+              <button
+                className={`camera-source-option ${cameraSource === CAMERA_SOURCE.STREAM ? 'camera-source-option-active' : ''}`}
+                type="button"
+                onClick={() => handleCameraSourceChange(CAMERA_SOURCE.STREAM)}
+                disabled={isActive || isLoading}
+                aria-pressed={cameraSource === CAMERA_SOURCE.STREAM}
+              >
+                스트림 URL
+              </button>
+            </div>
+            <label className="camera-selector">
+              <span className="camera-selector-label">
+                {cameraSource === CAMERA_SOURCE.STREAM ? '스트림 URL' : '카메라'}
+              </span>
+              {cameraSource === CAMERA_SOURCE.STREAM ? (
+                <input
+                  className="camera-selector-control"
+                  type="url"
+                  value={cameraStreamUrl}
+                  onChange={handleCameraStreamUrlChange}
+                  placeholder="http://192.168.0.10:4747/video"
+                  disabled={isActive || isLoading}
+                />
+              ) : (
+                <div className="camera-selector-row">
+                  <select
+                    className="camera-selector-control"
+                    value={selectedCameraId}
+                    onChange={handleCameraDeviceChange}
+                    onFocus={refreshCameraDevices}
+                    disabled={isLoading}
+                  >
+                    <option value="">기본 카메라</option>
+                    {cameraDevices.map((device, index) => (
+                      <option key={device.deviceId} value={device.deviceId}>
+                        {getCameraDeviceLabel(device, index)}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="camera-refresh-button"
+                    type="button"
+                    onClick={handleRefreshCameraDevices}
+                    disabled={isLoading || isRefreshingDevices}
+                    aria-label="카메라 목록 새로고침"
+                    title="카메라 목록 새로고침"
+                  >
+                    <RefreshIcon />
+                  </button>
+                </div>
+              )}
+            </label>
             <div className="voice-selector" aria-label="TTS 음성 타입 선택">
               <p className="voice-selector-label">음성 타입</p>
               <div className="voice-selector-options">
