@@ -72,8 +72,49 @@ const VOICE_OPTIONS = [
   { value: 'dad', label: '아빠', pitch: 0.82, rate: 0.88 },
 ]
 
+const KOREAN_VOICE_LANGUAGE_PREFIXES = ['ko', 'ko-kr']
+const VOICE_NAME_KEYWORDS = {
+  child: ['child', 'kid', 'young', 'girl', 'boy', '아이'],
+  mom: ['mom', 'mother', 'female', 'woman', '엄마', '여성'],
+  dad: ['dad', 'father', 'male', 'man', '아빠', '남성'],
+}
+const VOICE_FALLBACK_INDEX = {
+  child: 0,
+  mom: 1,
+  dad: 2,
+}
+
 const getVoiceOption = (voiceType) =>
   VOICE_OPTIONS.find((option) => option.value === voiceType) || VOICE_OPTIONS[0]
+
+const normalizeVoiceName = (voice) => `${voice?.name || ''} ${voice?.voiceURI || ''}`.toLowerCase()
+
+const isKoreanVoice = (voice) =>
+  KOREAN_VOICE_LANGUAGE_PREFIXES.some((prefix) => voice?.lang?.toLowerCase().startsWith(prefix))
+
+const getAvailableSpeechVoices = (voices) => {
+  const koreanVoices = voices.filter(isKoreanVoice)
+  return koreanVoices.length > 0 ? koreanVoices : voices
+}
+
+const getSpeechVoiceForType = (voices, voiceType) => {
+  if (!voices.length) {
+    return null
+  }
+
+  const availableVoices = getAvailableSpeechVoices(voices)
+  const keywords = VOICE_NAME_KEYWORDS[voiceType] || []
+  const matchedVoice = availableVoices.find((voice) =>
+    keywords.some((keyword) => normalizeVoiceName(voice).includes(keyword)),
+  )
+
+  if (matchedVoice) {
+    return matchedVoice
+  }
+
+  const fallbackIndex = VOICE_FALLBACK_INDEX[voiceType] ?? 0
+  return availableVoices[Math.min(fallbackIndex, availableVoices.length - 1)] || availableVoices[0]
+}
 
 const isCameraSecureContext = () => window.isSecureContext || window.location.hostname === 'localhost'
 
@@ -420,6 +461,7 @@ function ReadingPage() {
   const streamRef = useRef(null)
   const lastSpokenTextRef = useRef('')
   const [voiceType, setVoiceType] = useState(getVoiceOption(DEFAULT_VOICE_TYPE).value)
+  const [speechVoices, setSpeechVoices] = useState([])
   const [cameraStatus, setCameraStatus] = useState(CAMERA_STATUS.IDLE)
   const [cameraDevices, setCameraDevices] = useState([])
   const [selectedCameraId, setSelectedCameraId] = useState('')
@@ -633,6 +675,32 @@ function ReadingPage() {
   }, [refreshCameraDevices])
 
   useEffect(() => {
+    if (!window.speechSynthesis) {
+      return undefined
+    }
+
+    const syncVoices = () => {
+      setSpeechVoices(window.speechSynthesis.getVoices())
+    }
+
+    syncVoices()
+
+    if (typeof window.speechSynthesis.addEventListener === 'function') {
+      window.speechSynthesis.addEventListener('voiceschanged', syncVoices)
+    } else {
+      window.speechSynthesis.onvoiceschanged = syncVoices
+    }
+
+    return () => {
+      if (typeof window.speechSynthesis.removeEventListener === 'function') {
+        window.speechSynthesis.removeEventListener('voiceschanged', syncVoices)
+      } else if (window.speechSynthesis.onvoiceschanged === syncVoices) {
+        window.speechSynthesis.onvoiceschanged = null
+      }
+    }
+  }, [])
+
+  useEffect(() => {
     if (!navigator.mediaDevices?.addEventListener) {
       return undefined
     }
@@ -764,23 +832,21 @@ function ReadingPage() {
     window.speechSynthesis.cancel()
     const voiceOption = getVoiceOption(selectedVoiceType)
     const utterance = new SpeechSynthesisUtterance(text)
+    const selectedSpeechVoice = getSpeechVoiceForType(speechVoices, selectedVoiceType)
     utterance.lang = 'ko-KR'
+    if (selectedSpeechVoice) {
+      utterance.voice = selectedSpeechVoice
+    }
     utterance.pitch = voiceOption.pitch
     utterance.rate = voiceOption.rate
     window.speechSynthesis.speak(utterance)
-  }, [voiceType])
+  }, [speechVoices, voiceType])
 
   useEffect(() => {
-    if (!visionStatus.ttsText && !visionStatus.message) {
-      return
-    }
-
     const text =
       visionStatus.ttsText ||
       visionStatus.message ||
-      (cameraStatus === CAMERA_STATUS.ACTIVE
-        ? '인식 결과를 확인하고 있습니다.'
-        : '카메라를 시작하면 설명이 여기에 표시됩니다.')
+      '웹캠으로 책과 놀이도구를 비추면 AI가 인식 결과를 음성으로 안내합니다.'
 
     if (!text || text === lastSpokenTextRef.current) {
       return
@@ -881,9 +947,12 @@ function ReadingPage() {
   const resultText =
     visionStatus.ttsText ||
     visionStatus.message ||
-    (isActive ? '인식 결과를 확인하고 있습니다.' : '카메라를 시작하면 설명이 여기에 표시됩니다.')
+    '웹캠으로 책과 놀이도구를 비추면 AI가 인식 결과를 음성으로 안내합니다.'
   const ttsStepStatus =
-    isActive && resultText !== '인식 결과를 확인하고 있습니다.' ? 'success' : 'warning'
+    isActive &&
+    resultText !== '웹캠으로 책과 놀이도구를 비추면 AI가 인식 결과를 음성으로 안내합니다.'
+      ? 'success'
+      : 'warning'
 
   return (
     <div className="reading-page">
