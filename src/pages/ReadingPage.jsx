@@ -771,7 +771,16 @@ function ReadingPage() {
   }, [voiceType])
 
   useEffect(() => {
-    const text = visionStatus.ttsText
+    if (!visionStatus.ttsText && !visionStatus.message) {
+      return
+    }
+
+    const text =
+      visionStatus.ttsText ||
+      visionStatus.message ||
+      (cameraStatus === CAMERA_STATUS.ACTIVE
+        ? '인식 결과를 확인하고 있습니다.'
+        : '카메라를 시작하면 설명이 여기에 표시됩니다.')
 
     if (!text || text === lastSpokenTextRef.current) {
       return
@@ -779,7 +788,7 @@ function ReadingPage() {
 
     lastSpokenTextRef.current = text
     speakText(text, voiceType)
-  }, [speakText, visionStatus.ttsText, voiceType])
+  }, [cameraStatus, speakText, visionStatus.message, visionStatus.ttsText, voiceType])
 
   const getVideoFrameSize = useCallback(
     (sourceWidth, sourceHeight) => {
@@ -869,18 +878,12 @@ function ReadingPage() {
   const hasMatchedResult = visionStatus.result?.matched === true
   const objectStepStatus = renderedObjects.length > 0 || hasMatchedResult ? 'success' : 'warning'
   const fingerStepStatus = fingerTipStyle || hasMatchedResult ? 'success' : 'warning'
-  const ttsStepStatus = visionStatus.ttsText ? 'success' : 'warning'
   const resultText =
     visionStatus.ttsText ||
     visionStatus.message ||
     (isActive ? '인식 결과를 확인하고 있습니다.' : '카메라를 시작하면 설명이 여기에 표시됩니다.')
-  const fingerStatusMessage = !isActive
-    ? '카메라 시작 후 손끝 위치를 확인합니다.'
-    : !visionStatus.updatedAt
-      ? '첫 인식 결과를 기다리고 있습니다.'
-      : visionStatus.isConnected
-        ? '프레임을 분석 중입니다.'
-        : '백엔드 연결을 확인하고 있습니다.'
+  const ttsStepStatus =
+    isActive && resultText !== '인식 결과를 확인하고 있습니다.' ? 'success' : 'warning'
 
   return (
     <div className="reading-page">
@@ -943,12 +946,6 @@ function ReadingPage() {
                   {overlayIcon}
                 </span>
                 <p>{CAMERA_MESSAGES[cameraStatus]}</p>
-              </div>
-            )}
-
-            {isActive && (
-              <div className="finger-status" role="status" aria-live="polite">
-                {fingerStatusMessage}
               </div>
             )}
 
