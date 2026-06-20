@@ -873,12 +873,14 @@ function ReadingPage() {
   const resultText =
     visionStatus.ttsText ||
     visionStatus.message ||
-    '웹캠으로 책과 놀이도구를 비추면 AI가 인식 결과를 음성으로 안내합니다.'
+    (isActive ? '인식 결과를 확인하고 있습니다.' : '카메라를 시작하면 설명이 여기에 표시됩니다.')
   const fingerStatusMessage = !isActive
     ? '카메라 시작 후 손끝 위치를 확인합니다.'
-    : fingerTipStyle
-      ? '손끝 위치를 추적 중입니다.'
-      : visionStatus.message || (visionStatus.isConnected ? '손끝이 감지되지 않았습니다.' : '백엔드 인식 결과를 기다리고 있습니다.')
+    : !visionStatus.updatedAt
+      ? '첫 인식 결과를 기다리고 있습니다.'
+      : visionStatus.isConnected
+        ? '프레임을 분석 중입니다.'
+        : '백엔드 연결을 확인하고 있습니다.'
 
   return (
     <div className="reading-page">
