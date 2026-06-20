@@ -847,20 +847,6 @@ button:disabled {
   pointer-events: none;
 }
 
-.detection-box span {
-  position: absolute;
-  left: -5px;
-  top: -45px;
-  min-width: 94px;
-  height: 40px;
-  padding: 0 15px;
-  background-color: currentColor;
-  color: var(--color-text);
-  font-size: 24px;
-  font-weight: 400;
-  line-height: 40px;
-}
-
 .detection-box-primary {
   right: 12%;
   bottom: 8%;
@@ -1296,15 +1282,6 @@ button:disabled {
   .detection-box-accent {
     width: 100px;
     max-width: 24%;
-  }
-
-  .detection-box span {
-    top: -37px;
-    min-width: 72px;
-    height: 32px;
-    padding: 0 10px;
-    font-size: 18px;
-    line-height: 32px;
   }
 
   .finger-status {

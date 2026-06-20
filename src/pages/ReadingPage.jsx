@@ -354,6 +354,7 @@ const normalizeObjects = (payload) => {
       return {
         id: object?.id || object?.label || `object-${index}`,
         label: object?.label || object?.name || '객체',
+        confidence: toFiniteNumber(object?.confidence),
         variant: index % 2 === 0 ? 'primary' : 'accent',
         box,
         ...getFrameSize(object),
@@ -806,6 +807,7 @@ function ReadingPage() {
             fingerTip: null,
             objects: [],
             message: nextMessage,
+            ttsText: '',
             updatedAt: Date.now(),
           }))
         }
@@ -912,7 +914,15 @@ function ReadingPage() {
     }
   })()
 
-  const renderedObjects = visionStatus.objects
+  const matchedObjectLabel = visionStatus.result?.object || null
+  const matchedObjects = matchedObjectLabel
+    ? visionStatus.objects
+        .filter((object) => object.label === matchedObjectLabel)
+        .sort((left, right) => (right.confidence || 0) - (left.confidence || 0))
+        .slice(0, 1)
+    : []
+
+  const renderedObjects = matchedObjects
     .map((object) => {
       const dimensions = getVideoFrameSize(object.width, object.height)
       const style =
@@ -941,18 +951,15 @@ function ReadingPage() {
         : '휴대폰 카메라를 연결한 뒤 브라우저에서 카메라 권한을 허용해주세요.'
 
   const webcamStepStatus = isActive ? 'success' : isFailStatus ? 'fail' : 'warning'
-  const hasMatchedResult = visionStatus.result?.matched === true
-  const objectStepStatus = renderedObjects.length > 0 || hasMatchedResult ? 'success' : 'warning'
-  const fingerStepStatus = fingerTipStyle || hasMatchedResult ? 'success' : 'warning'
+  const hasDetectedObjects = visionStatus.objects.length > 0
+  const objectStepStatus = hasDetectedObjects ? 'success' : 'warning'
+  const fingerStepStatus = visionStatus.fingerTip ? 'success' : 'warning'
   const resultText =
     visionStatus.ttsText ||
     visionStatus.message ||
     '웹캠으로 책과 놀이도구를 비추면 AI가 인식 결과를 음성으로 안내합니다.'
-  const ttsStepStatus =
-    isActive &&
-    resultText !== '웹캠으로 책과 놀이도구를 비추면 AI가 인식 결과를 음성으로 안내합니다.'
-      ? 'success'
-      : 'warning'
+  const hasTtsResponse = Boolean(visionStatus.ttsText)
+  const ttsStepStatus = isActive && hasTtsResponse ? 'success' : 'warning'
 
   return (
     <div className="reading-page">
@@ -1030,9 +1037,7 @@ function ReadingPage() {
                 key={object.id}
                 className={`detection-box detection-box-${object.variant}`}
                 style={object.style}
-              >
-                <span>{object.label}</span>
-              </div>
+              />
             ))}
           </div>
 
