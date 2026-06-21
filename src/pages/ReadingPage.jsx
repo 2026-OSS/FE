@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { generateTtsAudio } from '../api/audio'
 import { detectInteraction } from '../api/vision'
 import { Button } from '../components/common'
 import logoImage from '../assets/logo.png'
@@ -633,6 +634,9 @@ function ReadingPage() {
   const frameRef = useRef(null)
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
+  const audioRef = useRef(null)
+  const audioUrlRef = useRef('')
+  const ttsRequestIdRef = useRef(0)
   const lastSpokenTextRef = useRef('')
   const [voiceType, setVoiceType] = useState(getVoiceOption(DEFAULT_VOICE_TYPE).value)
   const [speechVoices, setSpeechVoices] = useState([])
@@ -677,6 +681,19 @@ function ReadingPage() {
     })
   }, [])
 
+  const clearAudioPlayback = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.removeAttribute('src')
+      audioRef.current.load()
+    }
+
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current)
+      audioUrlRef.current = ''
+    }
+  }, [])
+
   const stopCamera = useCallback(() => {
     stopStreamTracks(streamRef.current)
     streamRef.current = null
@@ -698,9 +715,11 @@ function ReadingPage() {
       ttsText: '',
       updatedAt: null,
     })
+    clearAudioPlayback()
+    window.speechSynthesis?.cancel()
     clearLastFramePreview()
     setCameraStatus(CAMERA_STATUS.IDLE)
-  }, [clearLastFramePreview])
+  }, [clearAudioPlayback, clearLastFramePreview])
 
   const refreshCameraDevices = useCallback(async (options) => {
     if (!navigator.mediaDevices?.enumerateDevices) {
@@ -939,9 +958,11 @@ function ReadingPage() {
   useEffect(() => {
     return () => {
       stopStreamTracks(streamRef.current)
+      clearAudioPlayback()
+      window.speechSynthesis?.cancel()
       clearLastFramePreview()
     }
-  }, [clearLastFramePreview])
+  }, [clearAudioPlayback, clearLastFramePreview])
 
   useEffect(() => {
     if (!pageTurnDirection) {
@@ -1082,12 +1103,44 @@ function ReadingPage() {
     }
   }, [cameraStatus, captureCurrentFrame, voiceType])
 
-  const speakText = useCallback((text, selectedVoiceType = voiceType) => {
-    if (!text || !window.speechSynthesis) {
+  const speakText = useCallback(async (text, selectedVoiceType = voiceType) => {
+    if (!text) {
       return
     }
 
-    window.speechSynthesis.cancel()
+    const requestId = ttsRequestIdRef.current + 1
+    ttsRequestIdRef.current = requestId
+
+    clearAudioPlayback()
+    window.speechSynthesis?.cancel()
+
+    try {
+      const audioBlob = await generateTtsAudio(text, selectedVoiceType)
+
+      if (requestId !== ttsRequestIdRef.current || !(audioBlob instanceof Blob)) {
+        return
+      }
+
+      const audioUrl = URL.createObjectURL(audioBlob)
+      audioUrlRef.current = audioUrl
+
+      if (!audioRef.current) {
+        audioRef.current = new Audio()
+      }
+
+      const audio = audioRef.current
+      audio.src = audioUrl
+      audio.currentTime = 0
+      await audio.play()
+      return
+    } catch (error) {
+      console.error('OpenAI TTS Error:', error)
+    }
+
+    if (!window.speechSynthesis || requestId !== ttsRequestIdRef.current) {
+      return
+    }
+
     const voiceOption = getVoiceOption(selectedVoiceType)
     const utterance = new SpeechSynthesisUtterance(text)
     const selectedSpeechVoice = getSpeechVoiceForType(speechVoices, selectedVoiceType)
@@ -1098,7 +1151,7 @@ function ReadingPage() {
     utterance.pitch = voiceOption.pitch
     utterance.rate = voiceOption.rate
     window.speechSynthesis.speak(utterance)
-  }, [speechVoices, voiceType])
+  }, [clearAudioPlayback, speechVoices, voiceType])
 
   useEffect(() => {
     const effectiveTtsText = getEffectiveTtsText(visionStatus.ttsText)
