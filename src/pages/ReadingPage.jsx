@@ -1031,6 +1031,8 @@ function ReadingPage() {
         const payload = await detectInteraction({
           frame,
           voiceType,
+          page: `page${currentBookPage}`,
+          pageNumber: currentBookPage,
         })
 
         if (isCancelled) {
@@ -1080,7 +1082,7 @@ function ReadingPage() {
       isCancelled = true
       window.clearTimeout(pollTimer)
     }
-  }, [cameraStatus, captureCurrentFrame, voiceType])
+  }, [cameraStatus, captureCurrentFrame, currentBookPage, voiceType])
 
   const speakText = useCallback((text, selectedVoiceType = voiceType) => {
     if (!text || !window.speechSynthesis) {

@@ -68,11 +68,13 @@ curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8001/health
 ```
 
-프론트엔드에서 카메라를 켜면 카메라 프레임이 백엔드의 `/api/interaction/detect`로 전송됩니다.
+프론트엔드에서 카메라를 켜면 카메라 프레임과 현재 책 페이지가 백엔드의 `/api/interaction/detect`로 전송됩니다.
 
 ```text
 Frontend -> Backend -> AI 서버 -> Backend -> Frontend
 ```
+
+전송 필드는 `multipart/form-data`이며, `frame`, `voiceType`, `page`, `pageNumber`가 포함됩니다. 예를 들어 1페이지에서는 `page=page1`, `pageNumber=1`을 함께 보냅니다.
 
 현재 TTS는 브라우저 기본 `speechSynthesis`를 사용합니다. 독서 화면에서 아이, 엄마, 아빠 음성 타입을 선택할 수 있습니다.
 
