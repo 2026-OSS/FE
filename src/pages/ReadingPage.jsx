@@ -83,6 +83,11 @@ const VOICE_FALLBACK_INDEX = {
   mom: 1,
   dad: 2,
 }
+const RETRY_GUIDE_TEXTS = [
+  '음, 아직 잘 모르겠어. 손끝으로 다시 천천히 가르켜 줘.',
+  '음, 아직 잘 모르겠어. 손끝으로 다시 천천히 가리켜 줘.',
+]
+const BOOK_PAGE_COUNT = 3
 
 const getVoiceOption = (voiceType) =>
   VOICE_OPTIONS.find((option) => option.value === voiceType) || VOICE_OPTIONS[0]
@@ -237,6 +242,28 @@ const getNestedValue = (source, keys) => {
   return null
 }
 
+const getPathValue = (source, path) =>
+  path.split('.').reduce((current, key) => current?.[key], source)
+
+const getFirstPathValue = (source, paths) => {
+  for (const path of paths) {
+    const value = getPathValue(source, path)
+
+    if (value !== undefined && value !== null && value !== '') {
+      return value
+    }
+  }
+
+  return null
+}
+
+const normalizeLabel = (label) => String(label || '').trim().toLowerCase()
+
+const isRetryGuideText = (text) =>
+  RETRY_GUIDE_TEXTS.some((guideText) => normalizeLabel(text) === normalizeLabel(guideText))
+
+const getEffectiveTtsText = (text) => (isRetryGuideText(text) ? '' : text)
+
 const getFrameSize = (source) => {
   const width = toFiniteNumber(
     getNestedValue(source, ['frameWidth', 'imageWidth', 'videoWidth', 'sourceWidth', 'width']),
@@ -248,7 +275,7 @@ const getFrameSize = (source) => {
   return { width, height }
 }
 
-const mapPointToFrame = ({ x, y, sourceWidth, sourceHeight, frameWidth, frameHeight, mirrored = true }) => {
+const mapPointToFrame = ({ x, y, sourceWidth, sourceHeight, frameWidth, frameHeight, mirrored = false }) => {
   if ([x, y, sourceWidth, sourceHeight, frameWidth, frameHeight].some((value) => !Number.isFinite(value))) {
     return null
   }
@@ -269,7 +296,7 @@ const mapPointToFrame = ({ x, y, sourceWidth, sourceHeight, frameWidth, frameHei
   }
 }
 
-const mapBoxToFrame = ({ box, sourceWidth, sourceHeight, frameWidth, frameHeight, mirrored = true }) => {
+const mapBoxToFrame = ({ box, sourceWidth, sourceHeight, frameWidth, frameHeight, mirrored = false }) => {
   const isBboxArray = Array.isArray(box) && box.length >= 4
   const x1 = isBboxArray ? toFiniteNumber(box[0]) : null
   const y1 = isBboxArray ? toFiniteNumber(box[1]) : null
@@ -318,6 +345,10 @@ const normalizeFingerTip = (payload) => {
     payload?.hand?.fingerTip ||
     payload?.hand?.indexFingerTip ||
     payload?.hand ||
+    payload?.result?.fingerTip ||
+    payload?.result?.fingertip ||
+    payload?.data?.fingerTip ||
+    payload?.data?.fingertip ||
     null
 
   if (!source) {
@@ -341,7 +372,17 @@ const normalizeFingerTip = (payload) => {
 }
 
 const normalizeObjects = (payload) => {
-  const objects = payload?.objects || payload?.detectedObjects || payload?.detections || []
+  const objects =
+    payload?.objects ||
+    payload?.detectedObjects ||
+    payload?.detections ||
+    payload?.result?.objects ||
+    payload?.result?.detectedObjects ||
+    payload?.result?.detections ||
+    payload?.data?.objects ||
+    payload?.data?.detectedObjects ||
+    payload?.data?.detections ||
+    []
 
   if (!Array.isArray(objects)) {
     return []
@@ -352,7 +393,7 @@ const normalizeObjects = (payload) => {
       const box = object?.bbox || object?.box || object?.boundingBox || object
 
       return {
-        id: object?.id || object?.label || `object-${index}`,
+        id: object?.id || `${object?.label || 'object'}-${index}`,
         label: object?.label || object?.name || '객체',
         confidence: toFiniteNumber(object?.confidence),
         variant: index % 2 === 0 ? 'primary' : 'accent',
@@ -361,6 +402,138 @@ const normalizeObjects = (payload) => {
       }
     })
     .filter((object) => object.box)
+}
+
+const getVisionMessage = (payload) =>
+  getFirstPathValue(payload, [
+    'message',
+    'result.message',
+    'data.message',
+    'statusMessage',
+    'result.statusMessage',
+    'data.statusMessage',
+  ]) || ''
+
+const getVisionTtsText = (payload) =>
+  getFirstPathValue(payload, [
+    'ttsText',
+    'tts_text',
+    'speechText',
+    'spokenText',
+    'description',
+    'explanation',
+    'result.ttsText',
+    'result.tts_text',
+    'result.speechText',
+    'result.spokenText',
+    'result.description',
+    'result.explanation',
+    'data.ttsText',
+    'data.tts_text',
+    'data.speechText',
+    'data.spokenText',
+    'data.description',
+    'data.explanation',
+  ]) || ''
+
+const getMatchedObjectLabel = (payload) => {
+  const value = getFirstPathValue(payload, [
+    'object',
+    'objectLabel',
+    'match',
+    'matchedObject.label',
+    'matchedObject.name',
+    'matchedObject',
+    'targetObject',
+    'targetObject.label',
+    'targetObject.name',
+    'result.object',
+    'result.objectLabel',
+    'result.match',
+    'result.matchedObject.label',
+    'result.matchedObject.name',
+    'result.matchedObject',
+    'result.targetObject',
+    'result.targetObject.label',
+    'result.targetObject.name',
+    'data.object',
+    'data.objectLabel',
+    'data.match',
+    'data.matchedObject.label',
+    'data.matchedObject.name',
+    'data.matchedObject',
+    'data.targetObject',
+    'data.targetObject.label',
+    'data.targetObject.name',
+  ])
+
+  if (typeof value === 'boolean') {
+    return null
+  }
+
+  if (value && typeof value === 'object') {
+    return value.label || value.name || null
+  }
+
+  return value || null
+}
+
+const getVisionPageLabel = (payload) =>
+  getFirstPathValue(payload, [
+    'page',
+    'pageLabel',
+    'page_label',
+    'result.page',
+    'result.pageLabel',
+    'result.page_label',
+    'data.page',
+    'data.pageLabel',
+    'data.page_label',
+  ])
+
+const getInteractionMatched = (payload, matchedObjectLabel) => {
+  const matched = getFirstPathValue(payload, [
+    'matched',
+    'isMatched',
+    'result.matched',
+    'result.isMatched',
+    'data.matched',
+    'data.isMatched',
+  ])
+
+  return matched === true || normalizeLabel(matched) === 'true' || Boolean(matchedObjectLabel)
+}
+
+const getInteractionStatusText = ({ isActive, objects, fingerTip, ttsText, message, matched, matchedObjectLabel }) => {
+  if (getEffectiveTtsText(ttsText) || !isActive) {
+    return ''
+  }
+
+  const labels = [...new Set(objects.map((object) => object.label).filter(Boolean))]
+  const labelText = labels.length ? ` 감지한 객체: ${labels.slice(0, 3).join(', ')}.` : ''
+  const normalizedMatchedObjectLabel = normalizeLabel(matchedObjectLabel)
+
+  if (matched) {
+    const objectText = normalizedMatchedObjectLabel
+      ? ` 손끝이 ${matchedObjectLabel}을 가리키고 있어요.`
+      : ''
+
+    return `찾았어.${objectText} 페이지 설명을 불러오지 못했어요.`
+  }
+
+  if (objects.length > 0 && fingerTip) {
+    return `객체 ${objects.length}개와 손끝은 인식했지만, 손끝이 어떤 객체를 가리키는지 아직 연결하지 못했어요.${labelText}`
+  }
+
+  if (objects.length > 0) {
+    return `객체 ${objects.length}개는 인식했지만, 손끝 위치를 아직 찾지 못했어요.${labelText}`
+  }
+
+  if (fingerTip) {
+    return '손끝은 인식했지만, 설명할 객체를 아직 찾지 못했어요.'
+  }
+
+  return message || ''
 }
 
 function CheckIcon() {
@@ -480,6 +653,29 @@ function ReadingPage() {
     ttsText: '',
     updatedAt: null,
   })
+  const [lastFramePreview, setLastFramePreview] = useState({
+    url: '',
+    size: 0,
+    width: 0,
+    height: 0,
+  })
+  const [currentBookPage, setCurrentBookPage] = useState(1)
+  const [pageTurnDirection, setPageTurnDirection] = useState('')
+
+  const clearLastFramePreview = useCallback(() => {
+    setLastFramePreview((current) => {
+      if (current.url) {
+        URL.revokeObjectURL(current.url)
+      }
+
+      return {
+        url: '',
+        size: 0,
+        width: 0,
+        height: 0,
+      }
+    })
+  }, [])
 
   const stopCamera = useCallback(() => {
     stopStreamTracks(streamRef.current)
@@ -502,8 +698,9 @@ function ReadingPage() {
       ttsText: '',
       updatedAt: null,
     })
+    clearLastFramePreview()
     setCameraStatus(CAMERA_STATUS.IDLE)
-  }, [])
+  }, [clearLastFramePreview])
 
   const refreshCameraDevices = useCallback(async (options) => {
     if (!navigator.mediaDevices?.enumerateDevices) {
@@ -651,7 +848,8 @@ function ReadingPage() {
       ttsText: '',
       updatedAt: null,
     })
-  }, [])
+    clearLastFramePreview()
+  }, [clearLastFramePreview])
 
   const handleCameraDeviceChange = useCallback(
     async (event) => {
@@ -668,6 +866,25 @@ function ReadingPage() {
   const handleCameraStreamUrlChange = useCallback((event) => {
     setCameraStreamUrl(event.target.value)
   }, [])
+
+  const handleBookPageChange = useCallback((nextPage) => {
+    const normalizedNextPage = Math.min(Math.max(nextPage, 1), BOOK_PAGE_COUNT)
+
+    if (normalizedNextPage === currentBookPage) {
+      return
+    }
+
+    setPageTurnDirection(normalizedNextPage > currentBookPage ? 'next' : 'prev')
+    setCurrentBookPage(normalizedNextPage)
+  }, [currentBookPage])
+
+  const handlePreviousBookPage = useCallback(() => {
+    handleBookPageChange(currentBookPage - 1)
+  }, [currentBookPage, handleBookPageChange])
+
+  const handleNextBookPage = useCallback(() => {
+    handleBookPageChange(currentBookPage + 1)
+  }, [currentBookPage, handleBookPageChange])
 
   useEffect(() => {
     refreshCameraDevices({ requestPermission: false }).catch(() => {
@@ -722,8 +939,23 @@ function ReadingPage() {
   useEffect(() => {
     return () => {
       stopStreamTracks(streamRef.current)
+      clearLastFramePreview()
     }
-  }, [])
+  }, [clearLastFramePreview])
+
+  useEffect(() => {
+    if (!pageTurnDirection) {
+      return undefined
+    }
+
+    const timer = window.setTimeout(() => {
+      setPageTurnDirection('')
+    }, 520)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [pageTurnDirection])
 
   const captureCurrentFrame = useCallback(
     () =>
@@ -752,7 +984,27 @@ function ReadingPage() {
 
         try {
           context.drawImage(source, 0, 0, canvas.width, canvas.height)
-          canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.82)
+          canvas.toBlob((blob) => {
+            if (!blob) {
+              resolve(null)
+              return
+            }
+
+            const previewUrl = URL.createObjectURL(blob)
+            setLastFramePreview((current) => {
+              if (current.url) {
+                URL.revokeObjectURL(current.url)
+              }
+
+              return {
+                url: previewUrl,
+                size: blob.size,
+                width: canvas.width,
+                height: canvas.height,
+              }
+            })
+            resolve(blob)
+          }, 'image/jpeg', 0.82)
         } catch (error) {
           reject(error)
         }
@@ -785,13 +1037,17 @@ function ReadingPage() {
           return
         }
 
+        if (import.meta.env.DEV) {
+          console.debug('[interaction/detect]', payload)
+        }
+
         setVisionStatus({
           isConnected: true,
           fingerTip: normalizeFingerTip(payload),
           objects: normalizeObjects(payload),
           result: payload,
-          message: payload?.message || '',
-          ttsText: payload?.ttsText || payload?.description || '',
+          message: getVisionMessage(payload),
+          ttsText: getVisionTtsText(payload),
           updatedAt: Date.now(),
         })
       } catch (error) {
@@ -845,8 +1101,17 @@ function ReadingPage() {
   }, [speechVoices, voiceType])
 
   useEffect(() => {
-    const text =
-      visionStatus.ttsText ||
+    const effectiveTtsText = getEffectiveTtsText(visionStatus.ttsText)
+    const matchedObjectLabel = getMatchedObjectLabel(visionStatus.result)
+    const text = getInteractionStatusText({
+      isActive: cameraStatus === CAMERA_STATUS.ACTIVE,
+      objects: visionStatus.objects,
+      fingerTip: visionStatus.fingerTip,
+      ttsText: effectiveTtsText,
+      message: visionStatus.message,
+      matched: getInteractionMatched(visionStatus.result, matchedObjectLabel),
+      matchedObjectLabel,
+    }) || effectiveTtsText ||
       visionStatus.message ||
       '웹캠으로 책과 놀이도구를 비추면 AI가 인식 결과를 음성으로 안내합니다.'
 
@@ -856,7 +1121,16 @@ function ReadingPage() {
 
     lastSpokenTextRef.current = text
     speakText(text, voiceType)
-  }, [cameraStatus, speakText, visionStatus.message, visionStatus.ttsText, voiceType])
+  }, [
+    cameraStatus,
+    speakText,
+    visionStatus.fingerTip,
+    visionStatus.message,
+    visionStatus.objects,
+    visionStatus.result,
+    visionStatus.ttsText,
+    voiceType,
+  ])
 
   const getVideoFrameSize = useCallback(
     (sourceWidth, sourceHeight) => {
@@ -914,13 +1188,16 @@ function ReadingPage() {
     }
   })()
 
-  const matchedObjectLabel = visionStatus.result?.object || null
-  const matchedObjects = matchedObjectLabel
+  const matchedObjectLabel = getMatchedObjectLabel(visionStatus.result)
+  const pageLabel = getVisionPageLabel(visionStatus.result)
+  const isInteractionMatched = getInteractionMatched(visionStatus.result, matchedObjectLabel)
+  const normalizedMatchedObjectLabel = normalizeLabel(matchedObjectLabel)
+  const matchedObjects = normalizedMatchedObjectLabel
     ? visionStatus.objects
-        .filter((object) => object.label === matchedObjectLabel)
+        .filter((object) => normalizeLabel(object.label) === normalizedMatchedObjectLabel)
         .sort((left, right) => (right.confidence || 0) - (left.confidence || 0))
         .slice(0, 1)
-    : []
+    : visionStatus.objects
 
   const renderedObjects = matchedObjects
     .map((object) => {
@@ -954,11 +1231,33 @@ function ReadingPage() {
   const hasDetectedObjects = visionStatus.objects.length > 0
   const objectStepStatus = hasDetectedObjects ? 'success' : 'warning'
   const fingerStepStatus = visionStatus.fingerTip ? 'success' : 'warning'
+  const effectiveTtsText = getEffectiveTtsText(visionStatus.ttsText)
+  const objectLabelSummary = visionStatus.objects
+    .map((object) => object.label)
+    .filter(Boolean)
+    .join(', ')
+  const fingerTipSummary = visionStatus.fingerTip
+    ? `x ${Math.round(visionStatus.fingerTip.x)}, y ${Math.round(visionStatus.fingerTip.y)}`
+    : '없음'
+  const serverTextSummary = visionStatus.ttsText || visionStatus.message || '없음'
+  const lastFrameSummary = lastFramePreview.url
+    ? `${lastFramePreview.width}x${lastFramePreview.height}, ${Math.round(lastFramePreview.size / 1024)}KB`
+    : '없음'
+  const interactionStatusText = getInteractionStatusText({
+    isActive,
+    objects: visionStatus.objects,
+    fingerTip: visionStatus.fingerTip,
+    ttsText: effectiveTtsText,
+    message: visionStatus.message,
+    matched: isInteractionMatched,
+    matchedObjectLabel,
+  })
   const resultText =
-    visionStatus.ttsText ||
+    effectiveTtsText ||
+    interactionStatusText ||
     visionStatus.message ||
     '웹캠으로 책과 놀이도구를 비추면 AI가 인식 결과를 음성으로 안내합니다.'
-  const hasTtsResponse = Boolean(visionStatus.ttsText)
+  const hasTtsResponse = Boolean(effectiveTtsText)
   const ttsStepStatus = isActive && hasTtsResponse ? 'success' : 'warning'
 
   return (
@@ -1025,6 +1324,34 @@ function ReadingPage() {
               </div>
             )}
 
+            <div
+              className={`webcam-page-turner ${pageTurnDirection ? `webcam-page-turner-${pageTurnDirection}` : ''}`}
+              aria-label="책 페이지 선택"
+            >
+              <div className="webcam-page-book" aria-hidden="true">
+                <span className="webcam-page-sheet" />
+              </div>
+              <button
+                className="webcam-page-button"
+                type="button"
+                onClick={handlePreviousBookPage}
+                disabled={currentBookPage === 1}
+                aria-label="이전 페이지"
+              >
+                ‹
+              </button>
+              <span className="webcam-page-label">page {currentBookPage}</span>
+              <button
+                className="webcam-page-button"
+                type="button"
+                onClick={handleNextBookPage}
+                disabled={currentBookPage === BOOK_PAGE_COUNT}
+                aria-label="다음 페이지"
+              >
+                ›
+              </button>
+            </div>
+
             {fingerTipStyle && (
               <div className="finger-pointer" style={fingerTipStyle} aria-label="감지된 손끝 위치">
                 <span className="finger-pointer-dot" />
@@ -1043,6 +1370,42 @@ function ReadingPage() {
 
           <aside className="webcam-control-panel" aria-label="카메라 제어">
             <p className="webcam-status">{cameraControlMessage}</p>
+            {isActive && (
+              <dl className="vision-debug-panel" aria-label="인식 디버그 정보">
+                <div>
+                  <dt>객체</dt>
+                  <dd>{objectLabelSummary || '없음'}</dd>
+                </div>
+                <div>
+                  <dt>손끝</dt>
+                  <dd>{fingerTipSummary}</dd>
+                </div>
+                <div>
+                  <dt>매칭</dt>
+                  <dd>{isInteractionMatched ? matchedObjectLabel || '성공' : '없음'}</dd>
+                </div>
+                <div>
+                  <dt>페이지</dt>
+                  <dd>{pageLabel || '없음'}</dd>
+                </div>
+                <div>
+                  <dt>서버 문구</dt>
+                  <dd>{serverTextSummary}</dd>
+                </div>
+                <div>
+                  <dt>전송</dt>
+                  <dd>{lastFrameSummary}</dd>
+                </div>
+                {lastFramePreview.url && (
+                  <div className="vision-debug-frame">
+                    <dt>프레임</dt>
+                    <dd>
+                      <img src={lastFramePreview.url} alt="백엔드로 전송된 마지막 카메라 프레임" />
+                    </dd>
+                  </div>
+                )}
+              </dl>
+            )}
             <div className="camera-source-selector" aria-label="카메라 입력 방식 선택">
               <button
                 className={`camera-source-option ${cameraSource === CAMERA_SOURCE.DEVICE ? 'camera-source-option-active' : ''}`}
@@ -1158,7 +1521,7 @@ function ReadingPage() {
             icon={<ReplayIcon />}
             iconPosition="left"
             onClick={() => speakText(resultText)}
-            disabled={!visionStatus.ttsText && !visionStatus.message}
+            disabled={!effectiveTtsText && !interactionStatusText && !visionStatus.message}
           >
             설명 다시 듣기
           </Button>
