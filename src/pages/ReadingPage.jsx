@@ -89,6 +89,8 @@ const RETRY_GUIDE_TEXTS = [
   '음, 아직 잘 모르겠어. 손끝으로 다시 천천히 가리켜 줘.',
 ]
 const BOOK_PAGE_COUNT = 3
+const MATCH_STABLE_FRAMES = 2
+const MATCH_HOLD_FRAMES = 2
 
 const getVoiceOption = (voiceType) =>
   VOICE_OPTIONS.find((option) => option.value === voiceType) || VOICE_OPTIONS[0]
@@ -537,6 +539,54 @@ const getInteractionStatusText = ({ isActive, objects, fingerTip, ttsText, messa
   return message || ''
 }
 
+const getRecognitionState = ({ isActive, objects, fingerTip, matched, ttsText, message }) => {
+  if (!isActive) {
+    return {
+      code: 'camera_not_ready',
+      label: '카메라 대기',
+      detail: message || '카메라를 켜면 인식 상태가 여기에 표시돼요.',
+    }
+  }
+
+  if (getEffectiveTtsText(ttsText) || matched) {
+    return {
+      code: 'matched',
+      label: '설명 준비 완료',
+      detail: getEffectiveTtsText(ttsText) || message || '손끝이 가리킨 대상을 설명하고 있어요.',
+    }
+  }
+
+  if (objects.length > 0 && fingerTip) {
+    return {
+      code: 'not_target_area',
+      label: 'not_target_area',
+      detail: message || '손끝이 설명할 대상 위에 있지 않아요.',
+    }
+  }
+
+  if (objects.length > 0) {
+    return {
+      code: 'no_finger',
+      label: 'no_finger',
+      detail: message || '손끝을 아직 찾지 못했어요.',
+    }
+  }
+
+  if (fingerTip) {
+    return {
+      code: 'no_objects',
+      label: 'no_objects',
+      detail: message || '설명할 책이나 놀이도구를 아직 찾지 못했어요.',
+    }
+  }
+
+  return {
+    code: 'waiting',
+    label: '대기 중',
+    detail: message || '인식 결과를 기다리고 있어요.',
+  }
+}
+
 function CheckIcon() {
   return (
     <svg viewBox="0 0 45 45" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -636,7 +686,17 @@ function ReadingPage() {
   const streamRef = useRef(null)
   const audioRef = useRef(null)
   const audioUrlRef = useRef('')
+  const cachedAudioRef = useRef({
+    key: '',
+    url: '',
+  })
   const ttsRequestIdRef = useRef(0)
+  const stableMatchRef = useRef({
+    key: '',
+    count: 0,
+    misses: 0,
+  })
+  const lastSpokenKeyRef = useRef('')
   const lastSpokenTextRef = useRef('')
   const [voiceType, setVoiceType] = useState(getVoiceOption(DEFAULT_VOICE_TYPE).value)
   const [speechVoices, setSpeechVoices] = useState([])
@@ -656,6 +716,10 @@ function ReadingPage() {
     message: '',
     ttsText: '',
     updatedAt: null,
+  })
+  const [stableMatch, setStableMatch] = useState({
+    objectLabel: '',
+    ttsText: '',
   })
   const [lastFramePreview, setLastFramePreview] = useState({
     url: '',
@@ -692,6 +756,11 @@ function ReadingPage() {
       URL.revokeObjectURL(audioUrlRef.current)
       audioUrlRef.current = ''
     }
+
+    cachedAudioRef.current = {
+      key: '',
+      url: '',
+    }
   }, [])
 
   const stopCamera = useCallback(() => {
@@ -715,6 +784,17 @@ function ReadingPage() {
       ttsText: '',
       updatedAt: null,
     })
+    stableMatchRef.current = {
+      key: '',
+      count: 0,
+      misses: 0,
+    }
+    setStableMatch({
+      objectLabel: '',
+      ttsText: '',
+    })
+    lastSpokenKeyRef.current = ''
+    lastSpokenTextRef.current = ''
     clearAudioPlayback()
     window.speechSynthesis?.cancel()
     clearLastFramePreview()
@@ -851,6 +931,7 @@ function ReadingPage() {
   }, [cameraSource, cameraStreamUrl, refreshCameraDevices, selectedCameraId])
 
   const handleVoiceTypeChange = useCallback((nextVoiceType) => {
+    lastSpokenKeyRef.current = ''
     lastSpokenTextRef.current = ''
     setVoiceType(nextVoiceType)
   }, [])
@@ -858,6 +939,17 @@ function ReadingPage() {
   const handleCameraSourceChange = useCallback((nextCameraSource) => {
     setCameraSource(nextCameraSource)
     setCameraStatus(CAMERA_STATUS.IDLE)
+    stableMatchRef.current = {
+      key: '',
+      count: 0,
+      misses: 0,
+    }
+    setStableMatch({
+      objectLabel: '',
+      ttsText: '',
+    })
+    lastSpokenKeyRef.current = ''
+    lastSpokenTextRef.current = ''
     setVisionStatus({
       isConnected: false,
       fingerTip: null,
@@ -1110,9 +1202,29 @@ function ReadingPage() {
 
     const requestId = ttsRequestIdRef.current + 1
     ttsRequestIdRef.current = requestId
+    const cacheKey = JSON.stringify([selectedVoiceType, text])
+
+    window.speechSynthesis?.cancel()
+
+    if (audioUrlRef.current && cachedAudioRef.current.key === cacheKey) {
+      try {
+        if (!audioRef.current) {
+          audioRef.current = new Audio()
+        }
+
+        const audio = audioRef.current
+        if (audio.src !== audioUrlRef.current) {
+          audio.src = audioUrlRef.current
+        }
+        audio.currentTime = 0
+        await audio.play()
+        return
+      } catch (error) {
+        console.error('Cached TTS Replay Error:', error)
+      }
+    }
 
     clearAudioPlayback()
-    window.speechSynthesis?.cancel()
 
     try {
       const audioBlob = await generateTtsAudio(text, selectedVoiceType)
@@ -1123,6 +1235,10 @@ function ReadingPage() {
 
       const audioUrl = URL.createObjectURL(audioBlob)
       audioUrlRef.current = audioUrl
+      cachedAudioRef.current = {
+        key: cacheKey,
+        url: audioUrl,
+      }
 
       if (!audioRef.current) {
         audioRef.current = new Audio()
@@ -1154,32 +1270,83 @@ function ReadingPage() {
   }, [clearAudioPlayback, speechVoices, voiceType])
 
   useEffect(() => {
-    const effectiveTtsText = getEffectiveTtsText(visionStatus.ttsText)
+    const rawEffectiveTtsText = getEffectiveTtsText(visionStatus.ttsText)
     const matchedObjectLabel = getMatchedObjectLabel(visionStatus.result)
-    const text = getInteractionStatusText({
-      isActive: cameraStatus === CAMERA_STATUS.ACTIVE,
-      objects: visionStatus.objects,
-      fingerTip: visionStatus.fingerTip,
-      ttsText: effectiveTtsText,
-      message: visionStatus.message,
-      matched: getInteractionMatched(visionStatus.result, matchedObjectLabel),
-      matchedObjectLabel,
-    }) || effectiveTtsText ||
-      visionStatus.message ||
-      '웹캠으로 책과 놀이도구를 비추면 AI가 인식 결과를 음성으로 안내합니다.'
+    const isMatched = getInteractionMatched(visionStatus.result, matchedObjectLabel)
+    const hasStableCandidate =
+      Boolean(visionStatus.fingerTip) &&
+      Boolean(rawEffectiveTtsText) &&
+      Boolean(matchedObjectLabel) &&
+      isMatched
 
-    if (!text || text === lastSpokenTextRef.current) {
+    if (hasStableCandidate) {
+      const nextKey = `${normalizeLabel(matchedObjectLabel)}|${normalizeLabel(rawEffectiveTtsText)}`
+
+      if (stableMatchRef.current.key === nextKey) {
+        stableMatchRef.current.count += 1
+      } else {
+        stableMatchRef.current = {
+          key: nextKey,
+          count: 1,
+          misses: 0,
+        }
+      }
+
+      stableMatchRef.current.misses = 0
+
+      if (
+        stableMatchRef.current.count >= MATCH_STABLE_FRAMES &&
+        (stableMatch.objectLabel !== matchedObjectLabel || stableMatch.ttsText !== rawEffectiveTtsText)
+      ) {
+        setStableMatch({
+          objectLabel: matchedObjectLabel,
+          ttsText: rawEffectiveTtsText,
+        })
+      }
+    } else if (stableMatchRef.current.key) {
+      if (stableMatchRef.current.misses < MATCH_HOLD_FRAMES) {
+        stableMatchRef.current.misses += 1
+      } else {
+        stableMatchRef.current = {
+          key: '',
+          count: 0,
+          misses: 0,
+        }
+        if (stableMatch.objectLabel || stableMatch.ttsText) {
+          lastSpokenKeyRef.current = ''
+          lastSpokenTextRef.current = ''
+          setStableMatch({
+            objectLabel: '',
+            ttsText: '',
+          })
+        }
+      }
+    }
+
+    const immediateGuidanceText = !isMatched
+      ? rawEffectiveTtsText || visionStatus.message
+      : ''
+    const text = immediateGuidanceText || stableMatch.ttsText
+    const speechKey = immediateGuidanceText
+      ? `guide:${normalizeLabel(visionStatus.message)}|${normalizeLabel(text)}`
+      : stableMatch.ttsText
+        ? `matched:${normalizeLabel(stableMatch.objectLabel)}|${normalizeLabel(stableMatch.ttsText)}`
+        : ''
+
+    if (!text || !speechKey || speechKey === lastSpokenKeyRef.current) {
       return
     }
 
+    lastSpokenKeyRef.current = speechKey
     lastSpokenTextRef.current = text
     speakText(text, voiceType)
   }, [
     cameraStatus,
     speakText,
+    stableMatch.objectLabel,
+    stableMatch.ttsText,
     visionStatus.fingerTip,
     visionStatus.message,
-    visionStatus.objects,
     visionStatus.result,
     visionStatus.ttsText,
     voiceType,
@@ -1241,16 +1408,20 @@ function ReadingPage() {
     }
   })()
 
-  const matchedObjectLabel = getMatchedObjectLabel(visionStatus.result)
+  const matchedObjectLabel = stableMatch.objectLabel || getMatchedObjectLabel(visionStatus.result)
   const pageLabel = getVisionPageLabel(visionStatus.result)
   const isInteractionMatched = getInteractionMatched(visionStatus.result, matchedObjectLabel)
+  const rawEffectiveTtsText = getEffectiveTtsText(visionStatus.ttsText)
+  const immediateGuidanceText = !isInteractionMatched
+    ? rawEffectiveTtsText || visionStatus.message
+    : ''
   const normalizedMatchedObjectLabel = normalizeLabel(matchedObjectLabel)
   const matchedObjects = normalizedMatchedObjectLabel
     ? visionStatus.objects
         .filter((object) => normalizeLabel(object.label) === normalizedMatchedObjectLabel)
         .sort((left, right) => (right.confidence || 0) - (left.confidence || 0))
         .slice(0, 1)
-    : visionStatus.objects
+    : []
 
   const renderedObjects = matchedObjects
     .map((object) => {
@@ -1284,7 +1455,7 @@ function ReadingPage() {
   const hasDetectedObjects = visionStatus.objects.length > 0
   const objectStepStatus = hasDetectedObjects ? 'success' : 'warning'
   const fingerStepStatus = visionStatus.fingerTip ? 'success' : 'warning'
-  const effectiveTtsText = getEffectiveTtsText(visionStatus.ttsText)
+  const effectiveTtsText = immediateGuidanceText || stableMatch.ttsText
   const objectLabelSummary = visionStatus.objects
     .map((object) => object.label)
     .filter(Boolean)
@@ -1300,10 +1471,18 @@ function ReadingPage() {
     isActive,
     objects: visionStatus.objects,
     fingerTip: visionStatus.fingerTip,
-    ttsText: effectiveTtsText,
+    ttsText: stableMatch.ttsText,
     message: visionStatus.message,
     matched: isInteractionMatched,
     matchedObjectLabel,
+  })
+  const recognitionState = getRecognitionState({
+    isActive,
+    objects: visionStatus.objects,
+    fingerTip: visionStatus.fingerTip,
+    matched: isInteractionMatched,
+    ttsText: effectiveTtsText,
+    message: visionStatus.message,
   })
   const resultText =
     effectiveTtsText ||
@@ -1425,6 +1604,15 @@ function ReadingPage() {
             <p className="webcam-status">{cameraControlMessage}</p>
             {isActive && (
               <dl className="vision-debug-panel" aria-label="인식 디버그 정보">
+                <div className="vision-debug-status">
+                  <dt>상태</dt>
+                  <dd>
+                    <span className={`vision-status-chip vision-status-chip-${recognitionState.code}`}>
+                      {recognitionState.label}
+                    </span>
+                    <span className="vision-status-detail">{recognitionState.detail}</span>
+                  </dd>
+                </div>
                 <div>
                   <dt>객체</dt>
                   <dd>{objectLabelSummary || '없음'}</dd>
