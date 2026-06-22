@@ -91,6 +91,7 @@ const RETRY_GUIDE_TEXTS = [
 const BOOK_PAGE_COUNT = 3
 const MATCH_STABLE_FRAMES = 2
 const MATCH_HOLD_FRAMES = 2
+const getSelectedPageLabel = (pageNumber) => `page${pageNumber}`
 
 const getVoiceOption = (voiceType) =>
   VOICE_OPTIONS.find((option) => option.value === voiceType) || VOICE_OPTIONS[0]
@@ -985,9 +986,31 @@ function ReadingPage() {
       return
     }
 
+    stableMatchRef.current = {
+      key: '',
+      count: 0,
+      misses: 0,
+    }
+    setStableMatch({
+      objectLabel: '',
+      ttsText: '',
+    })
+    lastSpokenKeyRef.current = ''
+    lastSpokenTextRef.current = ''
+    clearAudioPlayback()
+    window.speechSynthesis?.cancel()
+    setVisionStatus((current) => ({
+      ...current,
+      fingerTip: null,
+      objects: [],
+      result: null,
+      message: '페이지를 바꿨어. 새 페이지를 다시 인식하고 있어.',
+      ttsText: '',
+      updatedAt: Date.now(),
+    }))
     setPageTurnDirection(normalizedNextPage > currentBookPage ? 'next' : 'prev')
     setCurrentBookPage(normalizedNextPage)
-  }, [currentBookPage])
+  }, [clearAudioPlayback, currentBookPage])
 
   const handlePreviousBookPage = useCallback(() => {
     handleBookPageChange(currentBookPage - 1)
@@ -1144,6 +1167,7 @@ function ReadingPage() {
         const payload = await detectInteraction({
           frame,
           voiceType,
+          selectedPage: getSelectedPageLabel(currentBookPage),
         })
 
         if (isCancelled) {
@@ -1193,7 +1217,7 @@ function ReadingPage() {
       isCancelled = true
       window.clearTimeout(pollTimer)
     }
-  }, [cameraStatus, captureCurrentFrame, voiceType])
+  }, [cameraStatus, captureCurrentFrame, currentBookPage, voiceType])
 
   const speakText = useCallback(async (text, selectedVoiceType = voiceType) => {
     if (!text) {
