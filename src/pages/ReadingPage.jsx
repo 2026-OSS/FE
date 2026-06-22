@@ -1217,13 +1217,17 @@ function ReadingPage() {
   }, [clearAudioPlayback, speechVoices, voiceType])
 
   useEffect(() => {
-    const effectiveTtsText = getEffectiveTtsText(visionStatus.ttsText)
+    const rawEffectiveTtsText = getEffectiveTtsText(visionStatus.ttsText)
     const matchedObjectLabel = getMatchedObjectLabel(visionStatus.result)
-    const stableObjectLabel = matchedObjectLabel || ''
-    const hasStableCandidate = Boolean(effectiveTtsText)
+    const isMatched = getInteractionMatched(visionStatus.result, matchedObjectLabel)
+    const hasStableCandidate =
+      Boolean(visionStatus.fingerTip) &&
+      Boolean(rawEffectiveTtsText) &&
+      Boolean(matchedObjectLabel) &&
+      isMatched
 
     if (hasStableCandidate) {
-      const nextKey = `${normalizeLabel(stableObjectLabel)}|${normalizeLabel(effectiveTtsText)}`
+      const nextKey = `${normalizeLabel(matchedObjectLabel)}|${normalizeLabel(rawEffectiveTtsText)}`
 
       if (stableMatchRef.current.key === nextKey) {
         stableMatchRef.current.count += 1
@@ -1239,11 +1243,11 @@ function ReadingPage() {
 
       if (
         stableMatchRef.current.count >= MATCH_STABLE_FRAMES &&
-        (stableMatch.objectLabel !== stableObjectLabel || stableMatch.ttsText !== effectiveTtsText)
+        (stableMatch.objectLabel !== matchedObjectLabel || stableMatch.ttsText !== rawEffectiveTtsText)
       ) {
         setStableMatch({
-          objectLabel: stableObjectLabel,
-          ttsText: effectiveTtsText,
+          objectLabel: matchedObjectLabel,
+          ttsText: rawEffectiveTtsText,
         })
       }
     } else if (stableMatchRef.current.key) {
@@ -1265,7 +1269,10 @@ function ReadingPage() {
       }
     }
 
-    const text = stableMatch.ttsText
+    const immediateGuidanceText = !isMatched
+      ? rawEffectiveTtsText || visionStatus.message
+      : ''
+    const text = immediateGuidanceText || stableMatch.ttsText
 
     if (!text || text === lastSpokenTextRef.current) {
       return
@@ -1279,6 +1286,7 @@ function ReadingPage() {
     stableMatch.objectLabel,
     stableMatch.ttsText,
     visionStatus.fingerTip,
+    visionStatus.message,
     visionStatus.result,
     visionStatus.ttsText,
     voiceType,
@@ -1343,6 +1351,10 @@ function ReadingPage() {
   const matchedObjectLabel = stableMatch.objectLabel || getMatchedObjectLabel(visionStatus.result)
   const pageLabel = getVisionPageLabel(visionStatus.result)
   const isInteractionMatched = getInteractionMatched(visionStatus.result, matchedObjectLabel)
+  const rawEffectiveTtsText = getEffectiveTtsText(visionStatus.ttsText)
+  const immediateGuidanceText = !isInteractionMatched
+    ? rawEffectiveTtsText || visionStatus.message
+    : ''
   const normalizedMatchedObjectLabel = normalizeLabel(matchedObjectLabel)
   const matchedObjects = normalizedMatchedObjectLabel
     ? visionStatus.objects
@@ -1383,7 +1395,7 @@ function ReadingPage() {
   const hasDetectedObjects = visionStatus.objects.length > 0
   const objectStepStatus = hasDetectedObjects ? 'success' : 'warning'
   const fingerStepStatus = visionStatus.fingerTip ? 'success' : 'warning'
-  const effectiveTtsText = stableMatch.ttsText || getEffectiveTtsText(visionStatus.ttsText)
+  const effectiveTtsText = immediateGuidanceText || stableMatch.ttsText
   const objectLabelSummary = visionStatus.objects
     .map((object) => object.label)
     .filter(Boolean)
