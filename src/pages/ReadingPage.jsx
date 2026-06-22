@@ -638,6 +638,10 @@ function ReadingPage() {
   const streamRef = useRef(null)
   const audioRef = useRef(null)
   const audioUrlRef = useRef('')
+  const cachedAudioRef = useRef({
+    key: '',
+    url: '',
+  })
   const ttsRequestIdRef = useRef(0)
   const stableMatchRef = useRef({
     key: '',
@@ -702,6 +706,11 @@ function ReadingPage() {
     if (audioUrlRef.current) {
       URL.revokeObjectURL(audioUrlRef.current)
       audioUrlRef.current = ''
+    }
+
+    cachedAudioRef.current = {
+      key: '',
+      url: '',
     }
   }, [])
 
@@ -1140,9 +1149,29 @@ function ReadingPage() {
 
     const requestId = ttsRequestIdRef.current + 1
     ttsRequestIdRef.current = requestId
+    const cacheKey = JSON.stringify([selectedVoiceType, text])
+
+    window.speechSynthesis?.cancel()
+
+    if (audioUrlRef.current && cachedAudioRef.current.key === cacheKey) {
+      try {
+        if (!audioRef.current) {
+          audioRef.current = new Audio()
+        }
+
+        const audio = audioRef.current
+        if (audio.src !== audioUrlRef.current) {
+          audio.src = audioUrlRef.current
+        }
+        audio.currentTime = 0
+        await audio.play()
+        return
+      } catch (error) {
+        console.error('Cached TTS Replay Error:', error)
+      }
+    }
 
     clearAudioPlayback()
-    window.speechSynthesis?.cancel()
 
     try {
       const audioBlob = await generateTtsAudio(text, selectedVoiceType)
@@ -1153,6 +1182,10 @@ function ReadingPage() {
 
       const audioUrl = URL.createObjectURL(audioBlob)
       audioUrlRef.current = audioUrl
+      cachedAudioRef.current = {
+        key: cacheKey,
+        url: audioUrl,
+      }
 
       if (!audioRef.current) {
         audioRef.current = new Audio()
@@ -1186,15 +1219,11 @@ function ReadingPage() {
   useEffect(() => {
     const effectiveTtsText = getEffectiveTtsText(visionStatus.ttsText)
     const matchedObjectLabel = getMatchedObjectLabel(visionStatus.result)
-    const isMatched = getInteractionMatched(visionStatus.result, matchedObjectLabel)
-    const hasStableCandidate =
-      Boolean(visionStatus.fingerTip) &&
-      Boolean(effectiveTtsText) &&
-      Boolean(matchedObjectLabel) &&
-      isMatched
+    const stableObjectLabel = matchedObjectLabel || ''
+    const hasStableCandidate = Boolean(effectiveTtsText)
 
     if (hasStableCandidate) {
-      const nextKey = `${normalizeLabel(matchedObjectLabel)}|${normalizeLabel(effectiveTtsText)}`
+      const nextKey = `${normalizeLabel(stableObjectLabel)}|${normalizeLabel(effectiveTtsText)}`
 
       if (stableMatchRef.current.key === nextKey) {
         stableMatchRef.current.count += 1
@@ -1210,10 +1239,10 @@ function ReadingPage() {
 
       if (
         stableMatchRef.current.count >= MATCH_STABLE_FRAMES &&
-        (stableMatch.objectLabel !== matchedObjectLabel || stableMatch.ttsText !== effectiveTtsText)
+        (stableMatch.objectLabel !== stableObjectLabel || stableMatch.ttsText !== effectiveTtsText)
       ) {
         setStableMatch({
-          objectLabel: matchedObjectLabel,
+          objectLabel: stableObjectLabel,
           ttsText: effectiveTtsText,
         })
       }
