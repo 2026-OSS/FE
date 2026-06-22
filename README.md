@@ -1,28 +1,104 @@
 # Fingertips Frontend
 
-시각장애 아동을 위한 AI 그림책 보조 서비스 **Fingertips**의 Frontend 프로젝트입니다.
+## 1. 프로젝트 개요
 
-## 프로젝트 구조
+Fingertips는 시각장애 아동이 그림책을 손끝으로 탐색하며 내용을 이해할 수 있도록 지원하는 AI 기반 그림책 보조 서비스이다.
+
+사용자가 그림책 속 특정 영역을 손가락으로 가리키면, AI가 해당 영역의 객체와 페이지를 인식하고 적절한 음성 설명을 제공한다.
+
+본 프로젝트는 전체 시스템 중 사용자 인터페이스(UI)와 카메라 입력, 음성 출력 기능을 담당하는 Frontend 애플리케이션이다.
+
+---
+
+## 2. 시스템 구성
+
+전체 시스템은 Frontend, Backend, AI Server로 구성된다.
 
 ```text
 Frontend (React)
         ↓
 Backend (FastAPI)
         ↓
-AI Server (YOLO)
+AI Server (YOLO11)
 ```
 
+데이터 흐름은 다음과 같다.
+
 ```text
-Frontend → Backend → AI Server → Backend → Frontend
+Frontend
+    ↓
+Backend
+    ↓
+AI Server
+    ↓
+Backend
+    ↓
+Frontend
 ```
+
+### 처리 과정
+
+1. 사용자가 카메라를 통해 그림책을 촬영한다.
+2. Frontend가 이미지를 Backend로 전송한다.
+3. Backend가 AI Server에 추론을 요청한다.
+4. AI Server가 객체 탐지 및 페이지 분류를 수행한다.
+5. 결과가 Backend를 거쳐 Frontend로 반환된다.
+6. Frontend가 탐지 결과를 시각화하고 음성으로 안내한다.
 
 ---
 
-# 실행 순서
+## 3. 주요 기능
 
-터미널 3개를 열고 아래 순서대로 실행합니다.
+### 그림책 객체 인식
 
-## 1. AI Server 실행
+* YOLO11 기반 객체 탐지
+* 그림책 객체 및 촉각 교구 인식
+* 점자 및 텍스트 영역 탐지
+
+### 손끝 상호작용
+
+* MediaPipe Hands 기반 손끝 위치 추적
+* 손끝과 객체 간 매칭
+* 사용자가 가리킨 영역 설명 제공
+
+### 음성 안내
+
+* Browser Speech Synthesis API 활용
+* 다양한 음성 스타일 제공
+
+  * 아이
+  * 엄마
+  * 아빠
+
+### 카메라 입력
+
+* 웹캠 지원
+* iPhone 연속성 카메라 지원
+* Android 외부 카메라 앱 지원
+* URL 기반 스트림 입력 지원
+
+---
+
+## 4. 실행 환경
+
+### 개발 환경
+
+| 항목            | 내용              |
+| ------------- | --------------- |
+| OS            | macOS           |
+| Runtime       | Node.js         |
+| Frontend      | React + Vite    |
+| Backend       | FastAPI         |
+| AI Model      | YOLO11          |
+| Hand Tracking | MediaPipe Hands |
+
+---
+
+# 5. 실행 방법
+
+본 프로젝트는 AI Server → Backend → Frontend 순으로 실행한다.
+
+## 5.1 AI Server 실행
 
 ```bash
 cd /Users/yeooni/Desktop/oss/AI-Data
@@ -49,7 +125,7 @@ python3 -m uvicorn server.main:app \
 
 ---
 
-## 2. Backend 실행
+## 5.2 Backend 실행
 
 ```bash
 cd /Users/yeooni/Desktop/oss/BE
@@ -69,7 +145,7 @@ python3 -m uvicorn app.main:app \
 
 ---
 
-## 3. Frontend 실행
+## 5.3 Frontend 실행
 
 ```bash
 cd /Users/yeooni/Desktop/oss/FE
@@ -80,7 +156,7 @@ VITE_API_BASE_URL=http://127.0.0.1:8000 \
 npm run dev
 ```
 
-접속 주소
+브라우저 접속 주소
 
 ```text
 http://127.0.0.1:3000
@@ -88,243 +164,80 @@ http://127.0.0.1:3000
 
 ---
 
-# 서버 상태 확인
+## 6. 시스템 상태 확인
 
-Backend
+### Backend 상태 확인
 
 ```bash
 curl http://127.0.0.1:8000/health
 ```
 
-AI Server
+### AI Server 상태 확인
 
 ```bash
 curl http://127.0.0.1:8001/health
 ```
 
-정상 동작 시 상태 코드 200이 반환됩니다.
+정상 동작 시 HTTP Status Code 200을 반환한다.
 
 ---
 
-# TTS
+## 7. 테스트 환경
 
-현재 TTS는 브라우저 기본 음성 엔진인 `speechSynthesis`를 사용합니다.
+### 실험 환경 1
 
-독서 화면에서 다음 음성 타입을 선택할 수 있습니다.
+* 형광등이 켜진 실내 환경
+* 일반 웹캠 사용
 
-* 아이
-* 엄마
-* 아빠
+> 조명 반사로 인해 일부 객체 인식 성능 저하가 발생하였다.
 
----
+### 실험 환경 2
 
-# 카메라 테스트
+* 직접 조명을 제거한 환경
+* 동일 카메라 사용
 
-## 1. iPhone 연속성 카메라 사용
-
-### 준비
-
-1. iPhone과 MacBook을 같은 Apple ID로 로그인
-2. Wi-Fi 및 Bluetooth 활성화
-3. 두 기기를 가까운 위치에 배치
-4. 브라우저 카메라 권한 허용
-
-### 사용 방법
-
-독서 화면에서
-
-```text
-카메라 → iPhone
-```
-
-또는
-
-```text
-카메라 → Continuity Camera
-```
-
-선택 후
-
-```text
-카메라 시작
-```
-
-버튼 클릭
+> 형광등 반사가 감소하면서 객체 인식 성능이 향상되었다.
 
 ---
 
-## 휴대폰 카메라 우선 선택
+## 8. 화면 구성
 
-```bash
-VITE_API_BASE_URL=http://127.0.0.1:8000 \
-VITE_PREFERRED_CAMERA_KEYWORDS=iphone,camo,droidcam \
-npm run dev
-```
+### 홈 화면
 
-예시
+> 프로젝트 소개 및 카메라 진입 화면
 
-* iPhone Camera
-* Camo Camera
-* DroidCam
+<img width="1258" height="736" alt="스크린샷 2026-06-22 오후 3 42 55" src="https://github.com/user-attachments/assets/5b37773c-3244-42ec-b86a-04a598168fda" />
+<img width="1221" height="750" alt="스크린샷 2026-06-22 오후 3 43 02" src="https://github.com/user-attachments/assets/fe599ff1-2fd5-405e-8808-4eb3ba65fdfb" />
 
 ---
 
-# Android / 외부 카메라 앱 사용
+### 독서 화면 (객체 탐지 결과 & 손끝 위치 추적
 
-지원 앱
+> 실시간 카메라 영상 및 AI 인식 결과 표시
+> YOLO11 기반 객체 탐지 결과 시각화
+> MediaPipe Hands 기반 손끝 위치 표시
 
-* DroidCam
-* Camo
-* EpocCam
-
-브라우저에 웹캠 장치로 등록되면 일반 카메라와 동일하게 선택 가능합니다.
+<img width="1232" height="767" alt="스크린샷 2026-06-22 오후 3 44 10" src="https://github.com/user-attachments/assets/62d265f5-7f3c-46ad-b490-e3097723adc8" />
 
 ---
 
-# 스트림 URL 사용
+## 9. 기술 스택
 
-카메라 장치 대신 영상 URL을 제공하는 경우
-
-예시
-
-```text
-http://192.168.0.10:4747/video
-```
-
-독서 화면에서
-
-```text
-스트림 URL 모드
-```
-
-선택 후 URL 입력
+| 분야              | 기술                           |
+| --------------- | ---------------------------- |
+| Frontend        | React, Vite                  |
+| Backend         | FastAPI                      |
+| AI              | YOLO11                       |
+| Hand Tracking   | MediaPipe Hands              |
+| TTS             | Browser Speech Synthesis API |
+| Dataset         | Roboflow                     |
+| Version Control | GitHub                       |
 
 ---
 
-### 기본 스트림 설정
+## 10. 기대 효과
 
-```bash
-VITE_API_BASE_URL=http://127.0.0.1:8000 \
-VITE_CAMERA_STREAM_URL=http://192.168.0.10:4747/video \
-npm run dev
-```
-
----
-
-# 휴대폰 브라우저에서 직접 테스트
-
-MacBook IP 확인
-
-```bash
-ipconfig getifaddr en0
-```
-
-예시
-
-```text
-192.168.0.20
-```
-
----
-
-## 서버 실행
-
-### AI Server
-
-```bash
-python3 -m uvicorn server.main:app \
-  --host 0.0.0.0 \
-  --port 8001
-```
-
-### Backend
-
-```bash
-AI_SERVER_URL=http://192.168.0.20:8001 \
-AI_PREDICT_PATH=/predict \
-AI_FRAME_FIELD_NAME=frame \
-python3 -m uvicorn app.main:app \
-  --host 0.0.0.0 \
-  --port 8000
-```
-
-### Frontend
-
-```bash
-VITE_API_BASE_URL=http://192.168.0.20:8000 \
-npm run dev -- --host 0.0.0.0
-```
-
----
-
-## 휴대폰 접속
-
-```text
-http://192.168.0.20:3000
-```
-
----
-
-### 주의사항
-
-iOS/Android 브라우저는 보안 정책상 HTTP 환경에서 카메라 접근이 제한될 수 있습니다.
-
-다음과 같은 경우 HTTPS 환경을 사용해야 합니다.
-
-* 카메라 접근 불가
-* getUserMedia 오류 발생
-* "현재 브라우저에서는 카메라 기능을 지원하지 않습니다" 표시
-
-권장 방법
-
-* ngrok
-* Cloudflare Tunnel
-* mkcert
-* HTTPS 배포 서버
-
----
-
-# YOLO 웹캠 스크립트 테스트
-
-Frontend를 거치지 않고 AI 모델만 테스트하는 경우
-
-## 카메라 장치 사용
-
-```bash
-CAMERA=phone PHONE_SOURCE=1 \
-./scripts/run_yolo11_webcam.sh
-```
-
-카메라가 보이지 않으면 인덱스를 변경합니다.
-
-```bash
-CAMERA=phone PHONE_SOURCE=0 \
-./scripts/run_yolo11_webcam.sh
-
-CAMERA=phone PHONE_SOURCE=1 \
-./scripts/run_yolo11_webcam.sh
-
-CAMERA=phone PHONE_SOURCE=2 \
-./scripts/run_yolo11_webcam.sh
-```
-
----
-
-## URL 스트림 사용
-
-```bash
-CAMERA=url \
-PHONE_URL=http://192.168.0.10:4747/video \
-./scripts/run_yolo11_webcam.sh
-```
-
----
-
-# 기술 스택
-
-* React
-* Vite
-* FastAPI
-* YOLO11
-* MediaPipe Hands
-* Browser Speech Synthesis API
+* 시각장애 아동의 그림책 접근성 향상
+* 촉각 교구와 AI 음성 안내를 결합한 상호작용 제공
+* 기존 오디오북의 일방향 정보 전달 한계 보완
+* 사용자의 손끝 탐색 행동을 기반으로 한 능동적 독서 경험 제공
