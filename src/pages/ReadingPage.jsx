@@ -539,6 +539,54 @@ const getInteractionStatusText = ({ isActive, objects, fingerTip, ttsText, messa
   return message || ''
 }
 
+const getRecognitionState = ({ isActive, objects, fingerTip, matched, ttsText, message }) => {
+  if (!isActive) {
+    return {
+      code: 'camera_not_ready',
+      label: '카메라 대기',
+      detail: message || '카메라를 켜면 인식 상태가 여기에 표시돼요.',
+    }
+  }
+
+  if (getEffectiveTtsText(ttsText) || matched) {
+    return {
+      code: 'matched',
+      label: '설명 준비 완료',
+      detail: getEffectiveTtsText(ttsText) || message || '손끝이 가리킨 대상을 설명하고 있어요.',
+    }
+  }
+
+  if (objects.length > 0 && fingerTip) {
+    return {
+      code: 'not_target_area',
+      label: 'not_target_area',
+      detail: message || '손끝이 설명할 대상 위에 있지 않아요.',
+    }
+  }
+
+  if (objects.length > 0) {
+    return {
+      code: 'no_finger',
+      label: 'no_finger',
+      detail: message || '손끝을 아직 찾지 못했어요.',
+    }
+  }
+
+  if (fingerTip) {
+    return {
+      code: 'no_objects',
+      label: 'no_objects',
+      detail: message || '설명할 책이나 놀이도구를 아직 찾지 못했어요.',
+    }
+  }
+
+  return {
+    code: 'waiting',
+    label: '대기 중',
+    detail: message || '인식 결과를 기다리고 있어요.',
+  }
+}
+
 function CheckIcon() {
   return (
     <svg viewBox="0 0 45 45" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1416,6 +1464,14 @@ function ReadingPage() {
     matched: isInteractionMatched,
     matchedObjectLabel,
   })
+  const recognitionState = getRecognitionState({
+    isActive,
+    objects: visionStatus.objects,
+    fingerTip: visionStatus.fingerTip,
+    matched: isInteractionMatched,
+    ttsText: effectiveTtsText,
+    message: visionStatus.message,
+  })
   const resultText =
     effectiveTtsText ||
     interactionStatusText ||
@@ -1536,6 +1592,15 @@ function ReadingPage() {
             <p className="webcam-status">{cameraControlMessage}</p>
             {isActive && (
               <dl className="vision-debug-panel" aria-label="인식 디버그 정보">
+                <div className="vision-debug-status">
+                  <dt>상태</dt>
+                  <dd>
+                    <span className={`vision-status-chip vision-status-chip-${recognitionState.code}`}>
+                      {recognitionState.label}
+                    </span>
+                    <span className="vision-status-detail">{recognitionState.detail}</span>
+                  </dd>
+                </div>
                 <div>
                   <dt>객체</dt>
                   <dd>{objectLabelSummary || '없음'}</dd>
