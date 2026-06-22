@@ -696,6 +696,7 @@ function ReadingPage() {
     count: 0,
     misses: 0,
   })
+  const lastSpokenKeyRef = useRef('')
   const lastSpokenTextRef = useRef('')
   const [voiceType, setVoiceType] = useState(getVoiceOption(DEFAULT_VOICE_TYPE).value)
   const [speechVoices, setSpeechVoices] = useState([])
@@ -792,6 +793,8 @@ function ReadingPage() {
       objectLabel: '',
       ttsText: '',
     })
+    lastSpokenKeyRef.current = ''
+    lastSpokenTextRef.current = ''
     clearAudioPlayback()
     window.speechSynthesis?.cancel()
     clearLastFramePreview()
@@ -928,6 +931,7 @@ function ReadingPage() {
   }, [cameraSource, cameraStreamUrl, refreshCameraDevices, selectedCameraId])
 
   const handleVoiceTypeChange = useCallback((nextVoiceType) => {
+    lastSpokenKeyRef.current = ''
     lastSpokenTextRef.current = ''
     setVoiceType(nextVoiceType)
   }, [])
@@ -944,6 +948,7 @@ function ReadingPage() {
       objectLabel: '',
       ttsText: '',
     })
+    lastSpokenKeyRef.current = ''
     lastSpokenTextRef.current = ''
     setVisionStatus({
       isConnected: false,
@@ -1308,6 +1313,7 @@ function ReadingPage() {
           misses: 0,
         }
         if (stableMatch.objectLabel || stableMatch.ttsText) {
+          lastSpokenKeyRef.current = ''
           lastSpokenTextRef.current = ''
           setStableMatch({
             objectLabel: '',
@@ -1321,11 +1327,17 @@ function ReadingPage() {
       ? rawEffectiveTtsText || visionStatus.message
       : ''
     const text = immediateGuidanceText || stableMatch.ttsText
+    const speechKey = immediateGuidanceText
+      ? `guide:${normalizeLabel(visionStatus.message)}|${normalizeLabel(text)}`
+      : stableMatch.ttsText
+        ? `matched:${normalizeLabel(stableMatch.objectLabel)}|${normalizeLabel(stableMatch.ttsText)}`
+        : ''
 
-    if (!text || text === lastSpokenTextRef.current) {
+    if (!text || !speechKey || speechKey === lastSpokenKeyRef.current) {
       return
     }
 
+    lastSpokenKeyRef.current = speechKey
     lastSpokenTextRef.current = text
     speakText(text, voiceType)
   }, [
