@@ -180,3 +180,7 @@ DroidCam, Camo, EpocCam처럼 휴대폰 앱이 영상 URL을 제공하는 방식
 ```bash
 CAMERA=url PHONE_URL=http://192.168.0.10:4747/video ./scripts/run_yolo11_webcam.sh
 ```
+
+## 라이선스
+
+이 프로젝트는 MIT License를 따릅니다. 자세한 내용은 [LICENSE](./LICENSE) 파일을 확인하세요.
